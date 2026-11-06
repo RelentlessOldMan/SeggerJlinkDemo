@@ -11,3 +11,13 @@ cmmrun-scan*.json
 cmmrun-check*.md
 cmmrun-check*.json
 *-PRIVATE.*
+venv/
+build/
+dist/
+*.spec
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,6 +1,6 @@
-# cmmrun
+# SeggerJlinkDemo 🔧
 
-Run unmodified Lauterbach PRACTICE (`.cmm`) scripts on a SEGGER J-Link, and find out up front which of your scripts can.
+**Run unmodified Lauterbach PRACTICE (`.cmm`) scripts on a SEGGER J-Link, and find out up front which of your scripts can.** The tool is called `cmmrun`: a Python interpreter for a subset of PRACTICE with pluggable backends, plus `scan` and `check` commands that analyse a whole script collection before anything touches hardware.
 
 TRACE32, PRACTICE and PowerView are trademarks of Lauterbach GmbH. This is an independent project, not affiliated with Lauterbach or SEGGER.
 
@@ -89,6 +89,10 @@ python tools/build_vocab.py <dir of pdftotext outputs of the public PRACTICE man
 
 `tests/corpus/` is a synthetic, deliberately messy script collection: odd encodings, broken blocks, dynamic `DO` paths, unknown commands. Every script in this repository was written from scratch for it.
 
+## Contributing
+
+This is a personal tool, published as-is — **issues and pull requests aren't accepted** (PRs auto-close). Fork it and make it your own. 🔧
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE). © 2026 RelentlessOldMan.

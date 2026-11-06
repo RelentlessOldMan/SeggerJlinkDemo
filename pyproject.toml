@@ -9,6 +9,7 @@ description = "Run a subset of PRACTICE (.cmm) scripts against non-Lauterbach de
 requires-python = ">=3.10"
 readme = "README.md"
 license = {text = "MIT"}
+authors = [{name = "RelentlessOldMan"}]
 dependencies = ["PyYAML>=6"]
 
 [project.optional-dependencies]

@@ -1,4 +1,14 @@
+# Normalize line endings: LF in the repository, checked out natively.
 * text=auto eol=lf
+
+# Windows-specific text files keep CRLF.
+*.sln text eol=crlf
+
+# Script samples keep their exact bytes (encodings and CRLF are test cases).
 *.cmm -text
 tests/corpus/** -text
 *.json text eol=lf
+
+# Binary / index artifacts.
+*.idx binary
+*.bin binary
