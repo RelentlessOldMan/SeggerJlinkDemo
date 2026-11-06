@@ -1,0 +1,18 @@
+; common init (synthetic)
+ENTRY &port &clock
+RESet
+SYStem.RESet
+SYStem.CPU STM32F407VG
+SYStem.CONFIG.DEBUGPORTTYPE &port
+SYStem.JtagClock &clock
+SYStem.Option.ResBreak OFF
+SYS.M.Attach
+SYStem.Up
+GOSUB zeta_setup_clocks
+ENDDO
+
+zeta_setup_clocks:
+  LOCAL &rcc
+  &rcc=0x40023800
+  D.S SD:&rcc+0x30 %LE %Long 0x00000001
+  RETURN

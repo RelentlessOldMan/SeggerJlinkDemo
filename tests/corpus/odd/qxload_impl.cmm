@@ -1,0 +1,3 @@
+ENTRY &f
+Data.LOAD.Binary &f 0x08000000
+ENDDO

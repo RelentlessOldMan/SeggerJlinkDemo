@@ -1,0 +1,3 @@
+; Grüße, café, été (cp1252 test)
+PRINT "µs timer"
+ENDDO

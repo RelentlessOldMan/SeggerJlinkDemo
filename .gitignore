@@ -1,0 +1,13 @@
+.venv/
+_downloads/
+runs/
+__pycache__/
+*.pyc
+.pytest_cache/
+cmmrun.egg-info/
+*.egg-info/
+cmmrun-scan*.md
+cmmrun-scan*.json
+cmmrun-check*.md
+cmmrun-check*.json
+*-PRIVATE.*

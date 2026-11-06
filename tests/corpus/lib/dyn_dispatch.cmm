@@ -1,0 +1,16 @@
+; dispatch a command chosen by the caller (synthetic)
+ENTRY &cmd &addr
+LOCAL &val &opt &where &line
+&cmd &addr %Long 0x1
+&opt="Verify"
+Data.Set &addr %Long 0x2 /&opt
+&val=Data.Long(D:&addr)
+&where="quux_label_&val"
+GOTO &where
+OPEN #1 settings_quux.txt /Read
+READ #1 %LINE &line
+CLOSE #1
+&line
+ENTER &val
+Data.&val 0x0
+ENDDO

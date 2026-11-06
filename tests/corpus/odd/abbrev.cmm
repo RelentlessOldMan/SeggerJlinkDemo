@@ -1,0 +1,8 @@
+sys.cpu CortexM4
+sys.u
+d.s 0x20000000 %l 0x1
+r.s pc 0x0
+rpt 3. s
+g
+b
+wait 100.ms

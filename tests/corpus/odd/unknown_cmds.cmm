@@ -1,0 +1,7 @@
+GLOBALON CMD QXLOAD DO ~~~~/qxload_impl.cmm
+QXLOAD fw.bin
+ZORBLAX.Frobnicate 0x10
+Data.Quuxify 0x20
+SYStem.Option.ZetaMode ON
+PRINT FROBNICATE.VALUE(1)
+B::Data.dump 0x0--0xff /NoAscii

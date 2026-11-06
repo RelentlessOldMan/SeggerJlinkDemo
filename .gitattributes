@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.cmm -text
+tests/corpus/** -text
+*.json text eol=lf

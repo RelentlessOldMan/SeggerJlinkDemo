@@ -1,0 +1,3 @@
+PRINT "a" \n  "b"
+; comment \n still comment
+ENDDO

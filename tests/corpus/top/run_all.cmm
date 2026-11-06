@@ -1,0 +1,23 @@
+// run every test of the zeta suite
+LOCAL &i &name &dir
+&dir=OS.PPD()
+&i=0.
+RePeaT 3.
+(
+  GOSUB pick_test &i
+  RETURNVALUES &name
+  DO "&dir/../lib/test_&name.cmm"
+  &i=&i+1.
+)
+DO ../lib/dyn_dispatch.cmm Data.Set 0x20000000
+DO ../lib/dyn_dispatch.cmm Data.Long 0x20000004
+DO ../lib/uses_system.cmm
+ENDDO
+
+pick_test:
+  PARAMETERS &idx
+  IF &idx==0.
+    RETURN "alpha"
+  ELSE IF &idx==1.
+    RETURN "beta"
+  RETURN "gamma"

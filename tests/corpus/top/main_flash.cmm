@@ -1,0 +1,27 @@
+; Main flash flow for the zeta widget board (synthetic test file)
+; Secret-looking words that must never appear in a report: Quuxcorp ZetaWidget
+LOCAL &zeta_image &board_rev
+&zeta_image="~~~~/../out/zeta_widget_fw.elf"
+&board_rev=3.
+DO ~~~~/../lib/common_init.cmm SWD 4000000.
+FLASH.RESet
+FLASH.Create 1. 0x08000000--0x0807FFFF 0x800 TARGET Long
+FLASH.TARGET 0x20000000 0x20001000 0x1000 ~~/demo/arm/flash/long/stm32f4.bin
+FLASH.ReProgram ALL /Erase
+Data.LOAD.Elf "&zeta_image" /NoCODE
+FLASH.ReProgram OFF
+Data.Set D:0x20000100 %Long 0xCAFEF00D
+IF Data.Long(D:0x20000100)!=0xCAFEF00D
+(
+    PRINT %ERROR "mailbox write failed for Quuxcorp"
+    ENDDO FALSE()
+)
+Register.Set PC Reset_Handler_quux
+Go
+WAIT !STATE.RUN() 5.s
+IF STATE.RUN()
+(
+  Break
+)
+PRINT "result=" Data.Long(D:0x20000104)
+ENDDO TRUE()

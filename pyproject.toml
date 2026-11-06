@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cmmrun"
+version = "0.1.0"
+description = "Run a subset of PRACTICE (.cmm) scripts against non-Lauterbach debug probes, and analyse script corpora"
+requires-python = ">=3.10"
+readme = "README.md"
+license = {text = "MIT"}
+dependencies = ["PyYAML>=6"]
+
+[project.optional-dependencies]
+jlink = ["pylink-square>=2.0"]
+t32 = ["lauterbach-trace32-rcl"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+cmmrun = "cmmrun.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cmmrun*"]
+
+[tool.setuptools.package-data]
+"cmmrun.lang" = ["vocab_data.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

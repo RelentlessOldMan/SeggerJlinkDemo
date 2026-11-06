@@ -1,0 +1,11 @@
+LOCAL &mode &n
+&mode="Up"
+&n="init"
+IF TRUE()
+  &mode="Down"
+SYStem.&mode
+GOSUB &n
+ENDDO
+
+init:
+  RETURN

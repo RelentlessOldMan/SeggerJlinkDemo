@@ -1,0 +1,5 @@
+DO no_such_script_quux.cmm
+IF TRUE()
+(
+  PRINT "x"
+ENDDO
