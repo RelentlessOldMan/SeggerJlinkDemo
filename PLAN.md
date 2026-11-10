@@ -191,8 +191,8 @@ cmmrun/
   corpus.py                                     (file discovery, DO/RUN/GOSUB resolution, call graph)
   dataflow.py                                   (static macro origins and value sets)
   analysis/  scan.py  check.py  support.py  anonymize.py  report.py
-  interp/    runner.py  (interpreter: milestone 2)
-  backends/  (mock, jlink, t32: milestone 2+)
+  interp/    values, expr, functions, interpreter, runner
+  backends/  base, mock, images (jlink: milestone 3)
   cli.py                                        (cmmrun scan | check | run)
 tools/       build_vocab.py (vocabulary from the public manuals)  probe_info.py (read-only J-Link probe info)
 tests/       pytest suite + tests/corpus (synthetic messy script collection)

@@ -1,0 +1,104 @@
+; Macros, control flow, GOSUB/DO and argument passing
+LOCAL &a &b &q &e &d &s &u &i &r1 &r2 &lst
+&a=0x10
+&b=&a+1
+PRINT "m1:" &b
+PRINT "m2:&b"
+&q="1+2"
+PRINT "m3:" &q
+PRINT "m4:&q"
+&e=1+2
+PRINT "m5:&e"
+&d=5.
+PRINT "m6:" &d+1
+&s="a b"
+PRINT "m7:&s|"
+PRINT "m8:[&undefinedmacro]"
+&u=TRUE()
+PRINT "m9:&u|"
+&f=1.5
+PRINT "m10:&f|"
+&str="x"+"y"
+PRINT "m11:&str|"
+&h="0x10"
+PRINT "m12:" &h+1
+PRINT "m13:&(a)z"
+&cmd="PRINT"
+&cmd "m14:" 7
+&sub="UPpeR"
+PRINT "m15:" STRing.&sub("q")
+&neg=-3.
+PRINT "m16:&neg"
+&big=0xFFFFFFFF
+PRINT "m17:&big"
+&p=STRing.LENgth("abc")
+PRINT "m18:&p"
+&z=0x0
+PRINT "m19:&z"
+&zz=0.
+PRINT "m20:&zz"
+; control flow
+&i=0
+WHILE &i<3
+(
+  PRINT "w:" &i
+  &i=&i+1
+)
+RePeaT 2.
+(
+  PRINT "rpt"
+)
+RePeaT 3. PRINT "rpt1"
+&i=5
+RePeaT
+(
+  &i=&i-1
+)
+WHILE &i>2
+PRINT "rw:" &i
+IF &i==2
+  PRINT "if1"
+ELSE
+  PRINT "else1"
+IF &i==3
+(
+  PRINT "if2"
+)
+ELSE IF &i==2
+(
+  PRINT "elif2"
+)
+ELSE
+(
+  PRINT "else2"
+)
+IF FALSE()
+  PRINT "nope"
+PRINT "after"
+GOSUB sub1 "arg1" 5
+PRINT "g:" "&r1"
+GOSUB sub2 7
+ENTRY &r1 &r2
+PRINT "g2:&r1,&r2"
+GOTO skip
+PRINT "skipped"
+skip:
+PRINT "jumped"
+DO "~~~~/_callee.cmm" "hello world" 0x20 abc
+ENTRY &r1 &r2
+PRINT "d:&r1|&r2"
+PRINT "vis:&lv"
+DO "~~~~/_params.cmm" "p1" "p2"
+RETURNVALUES &r1 &r2
+PRINT "pr:&r1|&r2"
+PRINT "ppd ok:" OS.PPD()==OS.PresentPracticeDirectory()
+ENDDO
+
+sub1:
+  ENTRY &x &y
+  PRINT "s:&x|&y"
+  &r1="fromsub"
+  RETURN
+sub2:
+  ENTRY &v
+  RETURN &v+1 "two"

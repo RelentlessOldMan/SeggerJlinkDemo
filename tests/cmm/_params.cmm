@@ -1,0 +1,3 @@
+PARAMETERS &x &y &zz
+PRINT "pa:&x|&y|&zz|"
+ENDDO "r&x" "lit"

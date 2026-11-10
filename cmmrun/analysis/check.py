@@ -165,6 +165,8 @@ def check(c: Corpus, anon: Anonymizer, backend: str = "jlink", hints: str | None
             res.blockers.add(("unknown_command", anon.command(st)))
         for fn in st.functions:
             m = v.function(fn)
+            if m.status == "partial" and sup.function(m.canon):
+                continue    # e.g. OS.FILE(): a real function that is also a name prefix in the vocabulary
             if m.status != "known":
                 res.blockers.add(("unknown_function", anon.function(fn)))
             elif not sup.function(m.canon):

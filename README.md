@@ -4,13 +4,18 @@
 
 TRACE32, PRACTICE and PowerView are trademarks of Lauterbach GmbH. This is an independent project, not affiliated with Lauterbach or SEGGER.
 
-## Status (v0.1.0)
+## Status (v0.2.0)
 
 | Command | State |
 |---|---|
 | `cmmrun scan <dir>` | **Works.** Anonymized statistics about a script collection |
-| `cmmrun check <dir>` | **Works.** A verdict per entry script and its call tree, plus a ranking of what blocks the rest. It checks against the *planned* support table (`cmmrun/analysis/support.py`) |
-| `cmmrun run <script>` | Not yet (milestone 2: interpreter, mock backend, J-Link backend) |
+| `cmmrun check <dir>` | **Works.** A verdict per entry script and its call tree, plus a ranking of what blocks the rest. It checks against the interpreter's own command and function tables, so `check` and `run` agree |
+| `cmmrun run <script> --backend mock` | **Works.** Runs on a simulated target (memory, registers, run state, virtual clock). `--dry-run` forces the mock target, and `--log` writes every target operation as JSON |
+| `cmmrun run <script> --backend jlink` | Not yet (milestone 3: J-Link backend) |
+
+`run` first checks every script the entry script can reach. Anything unsupported, a missing label, or a line built from macros (unless `--allow-dynamic` is given) stops it before the target is touched. Exit codes: 0 ok, 2 script error, 3 target error, 4 timeout, 5 unsupported.
+
+The interpreter's behaviour is checked against the real thing: the scripts in `tests/cmm/` were run in the free TRACE32 instruction-set simulator, and their recorded output (`*.expected`) must match cmmrun's line for line.
 
 See [PLAN.md](PLAN.md) for the design and [docs/practice-semantics.md](docs/practice-semantics.md) for the language notes.
 
@@ -74,7 +79,7 @@ For every entry script (a file no other file calls), the worst verdict in its ca
 
 It also ranks blockers: "this command appears in N blocked scripts and alone blocks M of them."
 
-## Safety rules for the J-Link backend (milestone 2)
+## Safety rules for the J-Link backend (milestone 3)
 
 - The probe is always chosen by serial number. Nothing ever auto-selects a probe, and a `deny_serials` list blocks probes that must never be opened.
 - Automatic J-Link firmware updates are disabled before a probe is opened.
@@ -85,7 +90,10 @@ It also ranks blockers: "this command appears in N blocked scripts and alone blo
 ```powershell
 python -m pytest -q
 python tools/build_vocab.py <dir of pdftotext outputs of the public PRACTICE manuals>
+python tools/t32sim.py --record tests/cmm      # re-record golden output (needs the TRACE32 simulator)
 ```
+
+`tools/t32sim.py` runs a script headless in the TRACE32 Arm simulator (`t32marm`) and captures what it prints. Use it to settle any question about PRACTICE behaviour: write a small script, run it, and add it to `tests/cmm/` with its recorded output.
 
 `tests/corpus/` is a synthetic, deliberately messy script collection: odd encodings, broken blocks, dynamic `DO` paths, unknown commands. Every script in this repository was written from scratch for it.
 

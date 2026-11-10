@@ -1,0 +1,6 @@
+ENTRY &p1 &p2 &p3
+PRINT "c:&p1|&p2|&p3"
+PRINT "seelocal:&a"
+LOCAL &lv
+&lv="calleelocal"
+ENDDO "ret1" 0x5

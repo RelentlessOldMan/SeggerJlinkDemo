@@ -1,0 +1,43 @@
+; Block scopes, implicit macros, ECHO, ranges, times, files
+IF TRUE()
+(
+  LOCAL &inblk
+  &inblk="b"
+  &implblk="ib"
+  PRIVATE &pb
+  &pb="pp"
+  PRINT "y0:&pb"
+)
+PRINT "y1:&inblk|&implblk|&pb"
+GOSUB s1
+PRINT "y2:&impl"
+DO "~~~~/_implc.cmm"
+PRINT "y3:&implc"
+GOSUB s2 "q"
+PRINT "y4:&ent"
+&o=0x0A
+PRINT "y5:&o|" &o
+&neg=0-0x10
+PRINT "y6:&neg|" &neg
+PRINT "y7:" 0x0 " " 0. " " 0xA " " -0x1
+ECHO "y8:" 10. 0x10 "s" TRUE()
+&lst="1 2 3"
+PRINT "y9:" STRing.SPLIT("&lst"," ",1)
+&tt=500.ms
+PRINT "y10:&tt"
+PRINT "y11:" 0x10++0x4
+PRINT "y12:" 0x10--0x20
+&path="~~~~/x.cmm"
+PRINT "y13:&path"
+PRINT "y14:" OS.FILE("~~~~/_implc.cmm") " " OS.FILE("~~~~/nope.cmm")
+PRINT "y15:" STRing.LENgth("")
+&emp=""
+PRINT "y16:[&emp]"
+PRINT "y17:" "&emp"==""
+ENDDO
+s1:
+  &impl="g"
+  RETURN
+s2:
+  ENTRY &ent
+  RETURN

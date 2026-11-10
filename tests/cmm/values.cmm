@@ -1,0 +1,76 @@
+; Numbers, operators, strings, functions and PRINT formats
+PRINT "n1:" 0x1F
+PRINT "n2:" 1F
+PRINT "n3:" 0y101
+PRINT "n4:" 10.+0x5
+PRINT "n5:" 0x5+10.
+PRINT "n6:" 3.*4.
+PRINT "n7:" 10./3
+PRINT "n8:" 10.%3
+PRINT "n9:" 1<<4
+PRINT "n10:" 0xF0>>4
+PRINT "n11:" 0xF0&0x3C
+PRINT "n12:" 0xF0|0x0F
+PRINT "n13:" 0xF0^0xFF
+PRINT "n14:" ~0
+PRINT "n15:" 1+2*3
+PRINT "n16:" (1+2)*3
+PRINT "n17:" 1.5
+PRINT "n18:" 1.5+1.
+PRINT "n19:" 2.5*2
+PRINT "n20:" -5.
+PRINT "n21:" 0-1.
+PRINT "n22:" 0x7FFFFFFF+1
+PRINT "n23:" 255.
+PRINT "n24:" 0xFF
+PRINT "n25:" 0xAB
+PRINT "n26:" 10
+PRINT "n27:" 9.-10.
+PRINT "n28:" 100000000.
+PRINT "n29:" 0x100000000
+PRINT "b1:" 1==1
+PRINT "b2:" 1!=1
+PRINT "b3:" TRUE()&&FALSE()
+PRINT "b4:" TRUE()||FALSE()
+PRINT "b5:" !TRUE()
+PRINT "b6:" 2>1
+PRINT "b7:" 2<=1
+PRINT "b8:" "a"=="a"
+PRINT "b9:" "a"=="b"
+PRINT "b10:" 10.==0xA
+PRINT "b11:" TRUE()^^TRUE()
+PRINT "s1:" "a"+"b"
+PRINT "s2:" "a" "b"
+PRINT "s3:" "a" " " "b"
+PRINT "s4:" STRing.LENgth("abcd")
+PRINT "s5:" STRing.MID("abcdef",1,2)
+PRINT "s6:" STRing.UPpeR("abc")
+PRINT "s7:" STRing.LoWeR("ABC")
+PRINT "s8:" STRing.SCAN("abcdef","cd",0)
+PRINT "s9:" STRing.Replace("aXbXc","X","-",0)
+PRINT "s10:" FORMAT.HEX(4,0x1F)
+PRINT "s11:" FORMAT.Decimal(5,42.)
+PRINT "s12:" FORMAT.DecimalU(0,42.)
+PRINT "s13:" STRing.CUT("abcdef",2)
+PRINT "s14:" STRing.CUT("abcdef",-2)
+PRINT "s15:" STRing.TRIM("  ab  ")
+PRINT "s16:" STRing.ComPare("abc","a*")
+PRINT "s17:" STRing.CHAR("abc",1)
+PRINT "s18:" "say ""hi"""
+PRINT "s19:" CONVert.CHAR(0x41)
+PRINT "s20:" STRing.SPLIT("a,b,c",",",1)
+PRINT "s21:" STRing.Count("a,b,c",",")
+PRINT "s22:" FORMAT.BINary(8,5)
+PRINT "s23:" FORMAT.HEX(0,0xabc)
+PRINT "s24:" STRing.FIND("abcdef","dx")
+PRINT "s25:" CONVert.HEXTOINT(0x1F)
+PRINT "s26:" STRing.SCANAndExtract("a=1,b=2","b=","none")
+PRINT "s27:" CONVert.INTTOHEX(31.)
+PRINT "f1:" %Hex 10.
+PRINT "f2:" %Decimal 0x10
+PRINT "f3:" %BINary 5
+PRINT "f4:" %Decimal 10. 0x10
+PRINT "f5:" %Hex 0x10 %Decimal 0x10
+PRINT "f6:" 'A'
+PRINT "f7:" 'A'+1
+ENDDO

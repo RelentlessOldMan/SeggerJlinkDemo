@@ -1,0 +1,69 @@
+; Macro text, scopes, target memory/registers and ON ERROR
+&s="abc"
+PRINT "x1:" "&s"
+&t="&s"+"d"
+PRINT "x2:&t"
+&n=0x10
+&m=&n
+PRINT "x3:&m"
+&e="&n"
+PRINT "x4:&e"
+&k=&n*2.
+PRINT "x5:&k"
+GLOBAL &g
+&g="gv"
+GOSUB scope
+PRINT "x6:&pl|&g"
+PRIVATE &pv
+&pv="p"
+GOSUB seepriv
+&cnt=0.
+&cnt=&cnt+1
+PRINT "x8:&cnt"
+&w=STRing.MID("hello",1.,3.)
+PRINT "x9:&w"
+&z=FORMAT.HEX(4,0x2A)
+PRINT "x10:&z"
+&y=0x2A
+PRINT "x11:" FORMAT.Decimal(0,&y)
+PRINT "x12:" &y==42.
+IF "&s"=="abc"
+  PRINT "x13:streq"
+&l=STRing.LENgth("&s")
+PRINT "x14:" &l
+PRINT "x15:" 10.*0x10
+PRINT "x16:" 0x10/3.
+PRINT "x17:" 1.0/4
+PRINT "x18:" 10.0
+PRINT "x19:" 1e3
+PRINT "x20:" 100.0/3.0
+SYStem.CPU CortexM4
+SYStem.Up
+Data.Set SD:0x1000 %Long 0x12345678
+PRINT "t1:" Data.Long(SD:0x1000)
+PRINT "t2:" Data.Byte(SD:0x1000)
+PRINT "t3:" Data.Word(SD:0x1002)
+Data.Set SD:0x1004 %Byte 0x1 0x2 0x3
+PRINT "t4:" Data.Long(SD:0x1004)
+Register.Set PC 0x400
+PRINT "t5:" Register(PC)
+PRINT "t6:" STATE.RUN()
+&addr=0x1000
+PRINT "t7:" Data.Long(SD:&addr+4)
+Data.Set SD:0x1010 %LE %Long 0xAABBCCDD
+PRINT "t8:" Data.Byte(SD:0x1010)
+ON ERROR GOTO handler
+PRINT "e1"
+NOSUCHCMD
+PRINT "e2-not"
+handler:
+PRINT "e3:handled"
+ENDDO
+scope:
+  LOCAL &pl
+  &pl="sublocal"
+  PRINT "x6a:&pl|&g"
+  RETURN
+seepriv:
+  PRINT "x7:&pv|"
+  RETURN

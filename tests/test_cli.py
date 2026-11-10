@@ -5,8 +5,59 @@ from cmmrun.cli import main
 from conftest import CORPUS, PRIVATE_TOKENS
 
 
-def test_run_stub():
-    assert main(["run", "x.cmm"]) == 5
+def _script(tmp_path, name, text):
+    p = tmp_path / name
+    p.write_text(text, encoding="ascii")
+    return str(p)
+
+
+def test_run_missing_script(tmp_path):
+    assert main(["run", str(tmp_path / "nope.cmm")]) == 2
+
+
+def test_run_ok_and_log(tmp_path, capsys):
+    s = _script(tmp_path, "ok.cmm", 'SYStem.CPU CortexM4\nSYStem.Up\nData.Set 0x20000000 %Long 0x11223344\n'
+                'PRINT "v=" Data.Long(D:0x20000000)\nENTRY &a\nPRINT "a=&a"\nENDDO\n')
+    log = tmp_path / "log.json"
+    assert main(["run", s, "hi", "--log", str(log)]) == 0
+    assert capsys.readouterr().out.splitlines() == ["v=11223344", "a=hi"]
+    ops = [e["op"] for e in json.loads(log.read_text())["events"]]
+    assert ops[:3] == ["cpu", "connect", "reset"] and "write" in ops
+
+
+def test_run_target_error_without_connection(tmp_path):
+    s = _script(tmp_path, "t.cmm", "Data.Set 0x0 %Long 0x1\nENDDO\n")
+    assert main(["run", s]) == 3
+
+
+def test_run_script_error(tmp_path):
+    s = _script(tmp_path, "e.cmm", "PRINT 1/0\nENDDO\n")
+    assert main(["run", s]) == 2
+
+
+def test_run_timeout(tmp_path):
+    s = _script(tmp_path, "w.cmm", "WHILE TRUE()\n(\n  WAIT 1.s\n)\n")
+    assert main(["run", s, "--timeout", "5"]) == 4
+
+
+def test_preflight_refuses_unsupported_before_running(tmp_path, capsys):
+    s = _script(tmp_path, "u.cmm", 'PRINT "should not print"\nSYStem.Up\nTrace.List\nENDDO\n')
+    assert main(["run", s]) == 5
+    cap = capsys.readouterr()
+    assert "should not print" not in cap.out and "Trace.List" in cap.err
+
+
+def test_preflight_dynamic_needs_flag(tmp_path):
+    s = _script(tmp_path, "d.cmm", '&c="PRINT"\n&c "x"\nENDDO\n')
+    assert main(["run", s]) == 5
+    assert main(["run", s, "--allow-dynamic"]) == 0
+
+
+def test_preflight_follows_do_and_checks_labels(tmp_path, capsys):
+    _script(tmp_path, "callee.cmm", "GOSUB nowhere\nENDDO\n")
+    s = _script(tmp_path, "main.cmm", 'DO "~~~~/callee.cmm"\nENDDO\n')
+    assert main(["run", s]) == 5
+    assert "nowhere" in capsys.readouterr().err
 
 
 def _no_private(text: str):
