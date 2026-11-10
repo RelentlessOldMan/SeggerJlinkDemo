@@ -120,6 +120,25 @@ def cmd_check(a) -> int:
     return EXIT_OK
 
 
+def cmd_probes(a) -> int:
+    """List SEGGER probes from the OS USB device list. Opens nothing."""
+    from .backends.jlink import list_probes, load_config, user_deny_serials
+    from .interp.values import TargetError
+    try:
+        deny = load_config(a.target).deny_serials if a.target else user_deny_serials()
+        probes = list_probes()
+    except TargetError as e:
+        print(f"cmmrun: {e}", file=sys.stderr)
+        return 3
+    if not probes:
+        print("no SEGGER probes found")
+    for p in probes:
+        notes = [n for n, on in (("DENIED", p.serial in deny), ("on-board? (refused unless allow_onboard)",
+                                                               p.composite)) if on]
+        print(f"{p.serial:>12}  PID {p.pid:04X}  {p.name:<24} {'  '.join(notes)}")
+    return EXIT_OK
+
+
 def cmd_run(a) -> int:
     from .interp.runner import run_cli
     return run_cli(a)
@@ -129,6 +148,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="cmmrun", description="Analyse and run PRACTICE (.cmm) scripts.")
     ap.add_argument("--version", action="version", version=f"cmmrun {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("probes", help="list SEGGER probes from the USB device list (opens none)")
+    p.add_argument("--target", help="target.yaml, to mark its denied serials")
+    p.set_defaults(func=cmd_probes)
 
     p = sub.add_parser("inventory", help="quick look at a big tree: sizes, copies, and what a full scan costs (no parsing)")
     _common_analysis_args(p)

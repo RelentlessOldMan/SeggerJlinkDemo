@@ -11,7 +11,8 @@ TRACE32, PRACTICE and PowerView are trademarks of Lauterbach GmbH. This is an in
 | `cmmrun scan <dir>` | **Works.** Anonymized statistics about a script collection |
 | `cmmrun check <dir>` | **Works.** A verdict per entry script and its call tree, plus a ranking of what blocks the rest. It checks against the interpreter's own command and function tables, so `check` and `run` agree |
 | `cmmrun run <script> --backend mock` | **Works.** Runs on a simulated target (memory, registers, run state, virtual clock). `--dry-run` forces the mock target, and `--log` writes every target operation as JSON |
-| `cmmrun run <script> --backend jlink` | Not yet (milestone 3: J-Link backend) |
+| `cmmrun run <script> --backend jlink --target target.yaml` | **Safety layer done, not yet tried on a board.** Probe selection, deny list, on-board refusal, no firmware updates and the VTref check are tested on real hardware; connect, memory, registers, run control and flash are tested against a fake probe |
+| `cmmrun probes` | **Works.** Lists SEGGER probes from the OS USB device list without opening any |
 
 `run` first checks every script the entry script can reach. Anything unsupported, a missing label, or a line built from macros (unless `--allow-dynamic` is given) stops it before the target is touched. Exit codes: 0 ok, 2 script error, 3 target error, 4 timeout, 5 unsupported.
 
@@ -100,10 +101,23 @@ For every entry script (a file no other file calls), the worst verdict in its ca
 
 It also ranks blockers: "this command appears in N blocked scripts and alone blocks M of them."
 
-## Safety rules for the J-Link backend (milestone 3)
+## The J-Link backend and its safety rules
 
-- The probe is always chosen by serial number. Nothing ever auto-selects a probe, and a `deny_serials` list blocks probes that must never be opened.
-- Automatic J-Link firmware updates are disabled before a probe is opened.
+Needs `pip install -e .[jlink]` and the J-Link Software Pack from SEGGER. Copy [examples/target.example.yaml](examples/target.example.yaml) to `target.yaml` (gitignored), fill in the probe serial from `cmmrun probes`, then:
+
+```powershell
+cmmrun run demo\run_test.cmm --backend jlink --target target.yaml --log runs\log.json
+```
+
+Other SEGGER probes, such as the J-Link built into a dev kit, may be plugged into the same PC, so:
+
+- **The probe is always chosen by serial number.** Without one, `run` stops. Nothing lets the J-Link software pick a probe.
+- **Deny list.** `deny_serials` in `target.yaml` and in `~/.cmmrun/probes.yaml` (machine-wide) lists probes that are never opened. A denied serial is refused before the J-Link DLL is even loaded.
+- **Probes are listed through the OS USB device list**, which doesn't open them. The chosen serial must be present.
+- **On-board J-Links are refused** unless `probe.allow_onboard: true`: a probe that appears as a USB composite device with serial ports, or whose product name says `OB`.
+- **No firmware updates.** Automatic probe firmware updates are disabled before the probe is opened. (pylink's `disable_dialog_boxes()` is not used, because it sends `SilentUpdateFW`.)
+- **Never unsecures a locked chip**, which would mass-erase it.
+- **An unpowered target is a clean exit 3** (VTref below `min_vtref_mv`), before any connect.
 - `run` checks the whole script tree before it touches the target. Unsupported means exit code 5, with no connection made.
 
 ## Development

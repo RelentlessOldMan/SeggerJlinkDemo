@@ -105,8 +105,14 @@ def make_backend(a):
     if a.backend == "mock" or a.dry_run:
         from ..backends.mock import MockBackend
         return MockBackend()
-    from ..backends import jlink   # noqa: F401  (milestone: J-Link backend)
-    raise UnsupportedError("the J-Link backend is not available yet; use --backend mock")
+    try:
+        import pylink  # noqa: F401
+    except ImportError:
+        raise UnsupportedError("the J-Link backend needs pylink-square: pip install cmmrun[jlink]") from None
+    from ..backends.jlink import JLinkBackend, load_config
+    b = JLinkBackend(load_config(a.target))
+    b.check()          # serial, deny list and on-board rule, before any script runs; opens nothing
+    return b
 
 
 def run_cli(a) -> int:
@@ -121,6 +127,9 @@ def run_cli(a) -> int:
     except (UnsupportedError, ImportError) as e:
         print(f"cmmrun: {e}", file=sys.stderr)
         return EXIT_UNSUPPORTED
+    except TargetError as e:
+        print(f"cmmrun: {e}", file=sys.stderr)
+        return EXIT_TARGET
     it = Interpreter(backend, out=out, timeout=a.timeout)
     try:
         entry = it.resolve_script(a.script, None)

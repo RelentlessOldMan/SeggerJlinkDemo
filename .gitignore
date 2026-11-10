@@ -21,3 +21,7 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local probe/target config (serials stay off GitHub)
+target.yaml
+*.local.yaml
