@@ -21,6 +21,11 @@ def _common_analysis_args(p):
     p.add_argument("--private-map", metavar="FILE",
                    help="also write a local id->real-name map (never share this file)")
     p.add_argument("--salt-file", help="salt file for ids (default ~/.cmmrun/salt)")
+    p.add_argument("--exclude", nargs="+", default=[], metavar="GLOB",
+                   help="skip directories or files whose relative path or name matches (e.g. archive '*/old/*')")
+    p.add_argument("--jobs", type=int, default=16,
+                   help="parallel directory listings and file reads (default 16; raise for slow network shares)")
+    p.add_argument("--quiet", action="store_true", help="no progress lines on stderr")
 
 
 def _write(out_dir: str, stem: str, data: dict, md: str) -> tuple[pathlib.Path, pathlib.Path]:
@@ -55,12 +60,39 @@ def _finish(a, anon, vocab, data, stem, render):
         print(f"WARNING: leak guard redacted {data['leak_guard_redactions']} words; please report this as a bug")
 
 
+def _mib(n: int) -> str:
+    return f"{n / 2**20:,.1f} MiB"
+
+
+def cmd_inventory(a) -> int:
+    from .corpus import inventory
+    t0 = time.time()
+    r = inventory(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet, top=a.top)
+    if not r["files"]:
+        print(f"no files with extensions {a.ext} under {a.root}", file=sys.stderr)
+        return EXIT_SCRIPT
+    dup = 1 - r["distinct_bytes"] / r["bytes"] if r["bytes"] else 0
+    sk = ", ".join(f"{k} {n}" for k, n in r["skipped"].items() if n) or "none"
+    e = r["estimate"]
+    print(f"scripts:          {r['files']:,} files, {_mib(r['bytes'])}")
+    print(f"distinct content: {r['distinct_files']:,} files, {_mib(r['distinct_bytes'])} ({dup:.0%} of the bytes are copies)")
+    print(f"skipped:          {sk}")
+    print(f"full scan/check:  about {e['memory_mib']:,} MiB of memory and {e['minutes']} min each (rough estimate)")
+    print(f"inventory took {time.time() - t0:.1f} s")
+    print("\nlargest top-level directories by distinct content (real names: local only, do not share):")
+    w = max([len(t["dir"]) for t in r["top_dirs"]] + [3])
+    for t in r["top_dirs"]:
+        print(f"  {t['dir']:<{w}}  {t['files']:>8,} files  {_mib(t['bytes']):>12}  distinct {_mib(t['distinct_bytes']):>12}")
+    print("\nuse --exclude to leave out archives or copies, e.g. --exclude old '*/archive/*'")
+    return EXIT_OK
+
+
 def cmd_scan(a) -> int:
     from .analysis.report import scan_markdown
     from .analysis.scan import scan
     from .corpus import load_corpus
     t0 = time.time()
-    c = load_corpus(a.root, tuple(a.ext))
+    c = load_corpus(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet)
     if not c.files:
         print(f"no files with extensions {a.ext} under {a.root}", file=sys.stderr)
         return EXIT_SCRIPT
@@ -76,7 +108,7 @@ def cmd_check(a) -> int:
     from .analysis.check import check
     from .analysis.report import check_markdown
     from .corpus import load_corpus
-    c = load_corpus(a.root, tuple(a.ext))
+    c = load_corpus(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet)
     if not c.files:
         print(f"no files with extensions {a.ext} under {a.root}", file=sys.stderr)
         return EXIT_SCRIPT
@@ -97,6 +129,11 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="cmmrun", description="Analyse and run PRACTICE (.cmm) scripts.")
     ap.add_argument("--version", action="version", version=f"cmmrun {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("inventory", help="quick look at a big tree: sizes, copies, and what a full scan costs (no parsing)")
+    _common_analysis_args(p)
+    p.add_argument("--top", type=int, default=15, help="top-level directories to list")
+    p.set_defaults(func=cmd_inventory)
 
     p = sub.add_parser("scan", help="statistics about a directory of scripts (anonymized, shareable)")
     _common_analysis_args(p)

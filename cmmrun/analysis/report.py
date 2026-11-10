@@ -7,7 +7,7 @@ import re
 # leak guard redacts any word that is not here, not public vocabulary, and
 # not an id. Keep this in sync when adding report fields.
 ALLOWED_TERMS = set("""
-schema cmmrun scan check tool_version anonymized corpus files skipped too_large unreadable totals
+schema cmmrun scan check tool_version anonymized corpus files duplicates skipped too_large unreadable unreadable_dirs links excluded totals
 physical_lines code_lines comment_lines blank_lines continued_lines lines_per_file encodings
 ascii utf utf-8 utf-16 cp1252 binary bom line_endings crlf lf cr mixed none issues occurrences
 binary_or_nul_bytes unterminated_string unbalanced_close unclosed_block duplicate_label parser_crash
@@ -73,7 +73,8 @@ def scan_markdown(r: dict, top: int = 60) -> str:
         L.append(f"Leak guard redactions: {r['leak_guard_redactions']} (0 expected).")
     L.append("")
     L.append("## Corpus")
-    L.append(f"- Files: **{c['files']}** (skipped: {_kv(c['skipped'])})")
+    L.append(f"- Files: **{c['files']}**, of which {c.get('duplicates', 0)} are byte-identical copies "
+             f"(skipped: {_kv(c['skipped'])})")
     L.append(f"- Lines: {t.get('physical_lines', 0)} physical; {t.get('code_lines', 0)} code, "
              f"{t.get('comment_lines', 0)} comment, {t.get('blank_lines', 0)} blank, "
              f"{t.get('continued_lines', 0)} continued")

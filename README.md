@@ -39,13 +39,34 @@ cmmrun scan  C:\path\to\scripts --out reports
 cmmrun check C:\path\to\scripts --out reports
 ```
 
-Each command writes Markdown and JSON reports: `reports/cmmrun-scan.md`/`.json` and `reports/cmmrun-check.md`/`.json`. Nothing is modified and nothing touches hardware. About 3,000 files take 10 to 30 seconds.
+Each command writes Markdown and JSON reports: `reports/cmmrun-scan.md`/`.json` and `reports/cmmrun-check.md`/`.json`. Nothing is modified and nothing touches hardware.
 
 Options:
 - `--ext .cmm .inc`: which extensions to read (default `.cmm`).
 - `--private`: real names, for your own use. The output files get a `-PRIVATE` suffix. **Never share them.**
 - `--private-map map.json`: writes a local id → real-name table, so you can look up what `u3fa9c1` or `F0042` refers to. **Never share it.**
 - `check --hints hints.yaml`: known values for macros the analysis can't work out, e.g. `{"*": {"cmd": ["Data.Set"]}}`.
+- `--exclude GLOB ...`: skip directories or files by name or relative path, e.g. `--exclude old '*/archive/*'`.
+- `--jobs N`: parallel directory listings and file reads (default 16).
+- `--quiet`: no progress lines on stderr.
+
+### Big trees and network shares
+
+Start with `inventory`. It lists and hashes the scripts without parsing them, and prints how much distinct script text there is, a rough memory and time estimate for `scan`/`check`, and the top-level directories that hold the most. Its directory list shows real names, so it is for your eyes only.
+
+```powershell
+cmmrun inventory \\server\share\scripts
+cmmrun scan      \\server\share\scripts --exclude old '*/archive/*' --jobs 32 --out reports
+```
+
+What makes big trees cheap:
+- Directory listings and file reads run in parallel, so network round trips overlap. With 5 ms of added latency per operation, 8,000 files take 61 s with `--jobs 1` and 4.6 s with the default 16.
+- File sizes come from the directory listing; there is no extra `stat` per file.
+- Byte-identical copies (branches, releases, archives) are parsed once and shared. The report counts them as `duplicates`.
+- Links and junctions are never followed, so a link loop can't trap the walk. Version-control and virtualenv directories are skipped.
+- Unreadable files and directories are counted in the report, not silently dropped.
+
+Measured on this machine: 40,000 files (mostly copies) take about 10 s for `scan` and 11 s for `check`. Distinct script text costs about 3.5 s and 60 MiB of memory per MiB, so a few hundred MiB of distinct scripts is fine on a normal PC; for more, split the run with `--exclude` or by subdirectory.
 
 ### What the anonymized report contains
 

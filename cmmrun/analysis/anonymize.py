@@ -209,9 +209,14 @@ def guard(data, vocab: Vocab, allowed_terms: set[str]) -> tuple[object, int]:
     count = 0
     allowed_upper = {t.upper() for t in allowed_terms}
 
+    def cheap_ok(w: str) -> bool:
+        return bool(ID_RE.match(w)) or w.upper() in allowed_upper or vocab.is_word(w)
+
+    def known_name(w: str) -> bool:
+        return vocab.command(w).status == "known" or vocab.function(w).status == "known"
+
     def ok_word(w: str) -> bool:
-        return (vocab.is_word(w) or w.upper() in allowed_upper or bool(ID_RE.match(w))
-                or vocab.command(w).status == "known" or vocab.function(w).status == "known")
+        return cheap_ok(w) or known_name(w)
 
     def clean_str(s: str) -> str:
         nonlocal count
@@ -227,7 +232,9 @@ def guard(data, vocab: Vocab, allowed_terms: set[str]) -> tuple[object, int]:
         # check dotted names as a whole first
         def rep_dotted(m):
             name = m.group(0)
-            if vocab.command(name).status == "known" or vocab.function(name).status == "known":
+            if "." not in name:
+                return name if ok_word(name) else rep(m)
+            if known_name(name):
                 return name
             return WORD_RE.sub(rep, name)
 

@@ -24,27 +24,42 @@ def required(seg: str) -> str:
 def abbrev_ok(tok: str, canon: str) -> bool:
     """True if `tok` is `canon` with only optional (lower-case) letters removed."""
     t, c = tok.upper(), canon
-    n, m = len(t), len(c)
-
-    @lru_cache(maxsize=None)
-    def go(i: int, j: int) -> bool:
-        if j == m:
-            return i == n
-        cj = c[j]
+    n = len(t)
+    # reach[i]: tok[:i] can be produced by the canon letters seen so far
+    reach = [True] + [False] * n
+    for j, cj in enumerate(c):
         must = j == 0 or cj.isupper() or cj.isdigit() or not cj.isalpha()
-        if i < n and t[i] == cj.upper() and go(i + 1, j + 1):
-            return True
-        return (not must) and go(i, j + 1)
-
-    return go(0, 0)
+        cu = cj.upper()
+        nxt = [False] * (n + 1)
+        for i in range(n + 1):
+            if not reach[i]:
+                continue
+            if not must:
+                nxt[i] = True                 # drop this optional letter
+            if i < n and t[i] == cu:
+                nxt[i + 1] = True             # keep it
+        reach = nxt
+        if not any(reach):
+            return False
+    return reach[n]
 
 
 class _Node:
-    __slots__ = ("children", "terminal")
+    __slots__ = ("children", "terminal", "_by_first")
 
     def __init__(self):
         self.children: dict[str, _Node] = {}
         self.terminal = False
+        self._by_first: dict[str, list[str]] | None = None
+
+    def by_first(self, ch: str) -> list[str]:
+        """Children whose name starts with letter `ch` (every abbreviation keeps the first letter)."""
+        if self._by_first is None:
+            idx: dict[str, list[str]] = {}
+            for k in self.children:
+                idx.setdefault(k[:1].upper(), []).append(k)
+            self._by_first = idx
+        return self._by_first.get(ch, [])
 
 
 @dataclass(frozen=True)
@@ -70,9 +85,10 @@ class Trie:
         """Children matching typed segment `seg`, best first:
         exact > required-letter form > any abbreviation (shorter names first)."""
         u = seg.upper()
-        exact = [k for k in node.children if k.upper() == u]
-        short = [k for k in node.children if required(k) == u and k not in exact]
-        rest = sorted((k for k in node.children
+        pool = node.by_first(u[:1])
+        exact = [k for k in pool if k.upper() == u]
+        short = [k for k in pool if required(k) == u and k not in exact]
+        rest = sorted((k for k in pool
                        if k not in exact and k not in short and abbrev_ok(seg, k)),
                       key=lambda k: (len(k), k))
         return [(k, False) for k in exact] + [(k, True) for k in short] + [(k, True) for k in rest]

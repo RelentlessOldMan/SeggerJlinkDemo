@@ -297,6 +297,7 @@ def scan(c: Corpus, anon: Anonymizer, max_examples: int = 3) -> dict:
         "anonymized": anon.enabled,
         "corpus": {
             "files": nfiles,
+            "duplicates": c.duplicates,
             "skipped": dict(c.skipped),
             "totals": dict(tot),
             "lines_per_file": dict(sorted(sizes.items(), key=lambda kv: _sort_bucket(kv[0]))),

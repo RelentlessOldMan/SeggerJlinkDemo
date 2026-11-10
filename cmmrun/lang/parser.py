@@ -25,7 +25,7 @@ DECLS = {"LOCAL", "PRIVATE", "GLOBAL"}
 TAKERS = {"ENTRY", "PARAMETERS", "RETURNVALUES", "ENTER", "INKEY"}
 
 
-@dataclass
+@dataclass(slots=True)
 class Stmt:
     kind: str                     # command | assign | block_open | block_close | label
     lineno: int
