@@ -36,8 +36,14 @@ class UnsupportedError(PracticeError):
 
 @dataclass(frozen=True)
 class Num:
+    """A PRACTICE integer: signed 64-bit, wrapping (the simulator shows -1 == 0xFFFFFFFFFFFFFFFF,
+    and 0x7FFFFFFFFFFFFFFF+1 < 0)."""
     v: int
     radix: str = "hex"         # hex | dec | bin | char
+
+    def __post_init__(self):
+        v = self.v & MASK64
+        object.__setattr__(self, "v", v - (1 << 64) if v >> 63 else v)
 
 
 @dataclass(frozen=True)

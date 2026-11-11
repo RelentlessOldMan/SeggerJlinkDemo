@@ -143,29 +143,28 @@ def file_flow(pf: ParsedFile, v: Vocab) -> FileFlow:
 
 
 def resolve_origins(ff: FileFlow, global_kinds: dict[str, set[str]]) -> None:
-    """Fixpoint: expand macro references into origin kinds."""
+    """Fixpoint: expand macro references into origin kinds. Macros that reference each other
+    (`&j=&i+1` / `&i=&j`) end up with the union of their kinds, whatever the definition order."""
     out: dict[str, set[str]] = {}
-
-    def origin(name: str, seen: frozenset) -> set[str]:
-        if name in out:
-            return out[name]
-        md = ff.defs.get(name)
-        if md is None:
-            if name in global_kinds:
-                return {"global"}
-            return {"inherited"}
+    for name, md in ff.defs.items():
         ks = set(md.kinds)
         if md.self_ref:
             ks.add("loop")
         for r in md.refs:
-            if r == name or r in seen:
-                continue
-            ks |= origin(r, seen | {name})
+            if r not in ff.defs:
+                ks.add("global" if r in global_kinds else "inherited")
         out[name] = ks
-        return ks
-
-    for name in list(ff.defs):
-        origin(name, frozenset())
+    changed = True
+    while changed:
+        changed = False
+        for name, md in ff.defs.items():
+            ks = out[name]
+            before = len(ks)
+            for r in md.refs:
+                if r != name and r in out:
+                    ks |= out[r]
+            if len(ks) != before:
+                changed = True
     ff.origins = out
 
 
@@ -182,6 +181,9 @@ def origins_of(ff: FileFlow, names, global_kinds) -> set[str]:
 
 
 # ---------------------------------------------------------------- value sets
+
+MAX_VALUE = 4096     # longer substituted texts are treated as unknown
+
 
 def substitute(text: str, env: dict[str, set[str]], cap: int) -> set[str] | None:
     """All texts obtained by replacing macros with their possible values."""
@@ -203,11 +205,14 @@ def substitute(text: str, env: dict[str, set[str]], cap: int) -> set[str] | None
         if total > cap:
             return None
     out = set()
+    pat = re.compile("|".join(rf"&\({re.escape(n)}\)|&{re.escape(n)}(?![A-Za-z0-9_])"
+                              for n in sorted(names, key=len, reverse=True)))
     for combo in itertools.product(*choices):
-        t = text
-        for n, val in zip(names, combo):
-            t = t.replace(f"&({n})", val)
-            t = re.sub(rf"&{re.escape(n)}(?![A-Za-z0-9_])", lambda _m, v=val: v, t)
+        vals = dict(zip(names, combo))
+        # one pass over the original text: a value that contains macro text is not expanded again
+        t = pat.sub(lambda m: vals[m.group(0)[1:].strip("()")], text)
+        if len(t) > MAX_VALUE:
+            return None
         out.add(t)
     return out
 

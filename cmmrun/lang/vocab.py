@@ -4,7 +4,8 @@ TRACE32 writes each command name with its required letters in upper case
 (`SYStem.Up`, `RePeaT`, `OS.PresentPracticeDirectory`). A command may be typed
 as any form that keeps every upper-case letter and drops only lower-case ones
 (`SYS.U`, `RPT`, `OS.PPD`), case-insensitively. The first letter of a segment
-always counts as required.
+counts as required, unless it is lower case in a segment that has upper-case
+letters: `sYmbol` can be typed `Y`, `SYM` or `sYmbol`.
 """
 from __future__ import annotations
 
@@ -14,9 +15,14 @@ from functools import lru_cache
 from importlib import resources
 
 
+def _first_required(seg: str) -> bool:
+    return not (seg[:1].islower() and any(c.isupper() for c in seg))
+
+
 def required(seg: str) -> str:
     """Required letters of a canonical segment, upper-cased."""
-    req = [c for i, c in enumerate(seg) if i == 0 or c.isupper() or c.isdigit()]
+    first = _first_required(seg)
+    req = [c for i, c in enumerate(seg) if (i == 0 and first) or c.isupper() or c.isdigit()]
     return "".join(req).upper()
 
 
@@ -27,8 +33,9 @@ def abbrev_ok(tok: str, canon: str) -> bool:
     n = len(t)
     # reach[i]: tok[:i] can be produced by the canon letters seen so far
     reach = [True] + [False] * n
+    first = _first_required(c)
     for j, cj in enumerate(c):
-        must = j == 0 or cj.isupper() or cj.isdigit() or not cj.isalpha()
+        must = (j == 0 and first) or cj.isupper() or cj.isdigit() or not cj.isalpha()
         cu = cj.upper()
         nxt = [False] * (n + 1)
         for i in range(n + 1):
@@ -53,11 +60,16 @@ class _Node:
         self._by_first: dict[str, list[str]] | None = None
 
     def by_first(self, ch: str) -> list[str]:
-        """Children whose name starts with letter `ch` (every abbreviation keeps the first letter)."""
+        """Children an abbreviation starting with letter `ch` can name: by the first letter, or by
+        the first upper-case letter when the first letter is optional (`Y` for `sYmbol`)."""
         if self._by_first is None:
             idx: dict[str, list[str]] = {}
             for k in self.children:
                 idx.setdefault(k[:1].upper(), []).append(k)
+                if not _first_required(k):
+                    up = next(c for c in k if c.isupper())
+                    if up != k[:1].upper():
+                        idx.setdefault(up, []).append(k)
             self._by_first = idx
         return self._by_first.get(ch, [])
 

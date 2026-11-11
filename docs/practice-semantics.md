@@ -13,10 +13,10 @@ Items marked *(manual)* come from the public PRACTICE manuals and have not been 
 ## Numbers and operators
 - **Hex by default**: `1F` and `1e3` are hex. `10.` is decimal. `1.5` and `10.0` are floats. `0x` is hex, `0y` is binary.
 - A result is decimal if either operand is decimal, otherwise hex (`10.+0x5` gives `15`, decimal).
-- Integers are 64 bit: `0x7FFFFFFF+1` gives `80000000`; `~0` and `-1` print as `0FFFFFFFFFFFFFFFF` in hex.
+- Integers are signed 64 bit and wrap: `0x7FFFFFFF+1` gives `80000000`; `~0` and `-1` print as `0FFFFFFFFFFFFFFFF` in hex; `&n=-1` then `&n<0` is TRUE; `0xFFFFFFFFFFFFFFFF+1` gives `0`; `(0x7FFFFFFFFFFFFFFF+1)<0` is TRUE.
 - Integer `/` truncates; `%` is modulo. Precedence is as in C (`1+2*3` = 7).
 - Ranges: `0x10++0x4` prints `10--14`; `0x10--0x20` prints `10--20`.
-- Times: `500.ms` stored in a macro is `0.5000000000s`.
+- Times: `500.ms` stored in a macro is `0.5000000000s`. The number before a time unit is decimal even without a dot (`10ms` is 0.010 s); `1Fms` is an error (`PAR_109 unexpected character in hex constant`). `1ms/0` is `division by zero`.
 
 ## How values print
 | Value | PRINT | ECHO | stored in a macro by `&m=` |
@@ -59,6 +59,9 @@ Items marked *(manual)* come from the public PRACTICE manuals and have not been 
 - `WHILE c` with a body. `RePeaT n` with a body, or inline: `RePeaT 3. PRINT "x"`.
 - `RePeaT` + body + `WHILE c` (no count) is a do-while loop.
 - GOSUB to a label (with arguments), GOTO a label, DO a script with arguments.
+- `ENTRY &line &x` with arguments `"a b" c` gives `&line` = `"a b"` (the quotes are kept): `&line` is a macro, only `%LINE` takes the whole line.
+- `LOCAL &a` then `PARAMETERS &a` fills the local `&a` (prints `[x]` for argument `x`).
+- *(cmmrun)* Nesting of DO and GOSUB is limited to 100 levels (`PRACTICE stack overflow`). Host file errors (OPEN, APPEND, Data.SAVE) are script errors that `ON ERROR` catches.
 - `ON ERROR GOTO label` catches an unknown command. The message looks like `##cbf_invcomm: unknown command`.
 - END ends all scripts. ENDDO returns to the caller. STOP pauses (cmmrun ends with a warning).
 - *(manual)* `JUMPTO` clears the stack. ON events other than ERROR (`STOP`, `TIME`, `ALWAYS`, `CMD`) are not supported by cmmrun.
@@ -68,6 +71,7 @@ Items marked *(manual)* come from the public PRACTICE manuals and have not been 
 - `STRing.CUT("abcdef",2)` = `cdef`; with `-2` it is `abcd`. `STRing.CHAR("abc",1)` = `62` (hex).
 - `STRing.SPLIT("a,b,c",",",1)` = `b`. `STRing.FIND("abcdef","dx")` is TRUE if any of the characters is found.
 - `STRing.SCANAndExtract(s,key,default)`: the key must start a whitespace-separated word, and the result is the rest of that word (`"a=1 b=2"`, `"b="` gives `2`; `"a=1,b=2"`, `"b="` gives the default).
+- `FORMAT.STRing("a",5,0x41)` = `aAAAA`: a number as the fill is a character code, taken as a byte.
 - `FORMAT.HEX(4,0x1F)` = `001F`. `FORMAT.Decimal(5,42.)` = `   42`. `FORMAT.BINary(8,5)` = `00000101`.
 - `CONVert.HEXTOINT` takes a **number**, not a string, and makes it decimal (`0x1F` gives `31`). `CONVert.INTTOHEX(31.)` gives hex `1F`. Neither is a command.
 - `OS.FILE(path)` is a bool. `OS.PPD()` is the directory of the running script.

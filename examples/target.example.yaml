@@ -1,15 +1,18 @@
 # Copy to target.yaml (gitignored) and fill in. Use `cmmrun probes` to see serials.
+# Values are read as text, so a serial with leading zeros is still the decimal number shown
+# by `cmmrun probes`. Quoting serials anyway keeps other YAML tools from reading them as octal.
 probe:
-  serial: 123456789          # required: the J-Link to use, by serial number
+  serial: "123456789"        # required: the J-Link to use, by serial number
   allow_onboard: false       # J-Links built into dev kits are refused unless true
 
 # Probes that must never be opened. Keep machine-wide ones in ~/.cmmrun/probes.yaml
 # (same key); both lists apply.
-deny_serials: []
+deny_serials: []             # e.g. ["000123456789", "000987654321"]
 
 device: STM32F407VG          # J-Link device name (J-Link Commander: `?` lists them)
 cpu_map: {}                  # optional: SYStem.CPU name -> J-Link device name
 interface: swd               # swd | jtag
-speed: 4000                  # kHz, auto or adaptive; SYStem.JtagClock overrides it
+speed: 4000                  # kHz (or "4MHz"), auto or adaptive. A script's SYStem.JtagClock
+                             # overrides it; there a number without a unit is Hz, as in TRACE32
 min_vtref_mv: 1000           # below this the target counts as unpowered (exit 3)
 # dll: C:/Program Files/SEGGER/JLink_V818/JLink_x64.dll

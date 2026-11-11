@@ -14,7 +14,7 @@ TRACE32, PRACTICE and PowerView are trademarks of Lauterbach GmbH. This is an in
 | `cmmrun run <script> --backend jlink --target target.yaml` | **Safety layer done, not yet tried on a board.** Probe selection, deny list, on-board refusal, no firmware updates and the VTref check are tested on real hardware; connect, memory, registers, run control and flash are tested against a fake probe |
 | `cmmrun probes` | **Works.** Lists SEGGER probes from the OS USB device list without opening any |
 
-`run` first checks every script the entry script can reach. Anything unsupported, a missing label, or a line built from macros (unless `--allow-dynamic` is given) stops it before the target is touched. Exit codes: 0 ok, 2 script error, 3 target error, 4 timeout, 5 unsupported.
+`run` first checks every script the entry script can reach (following `CD`). Anything unsupported (a command, a function, a debug symbol, a `~~` TRACE32 system path), a missing label or script, or a line built from macros (unless `--allow-dynamic` is given) stops it before the target is touched. Exit codes: 0 ok, 2 script error (including a missing label or script found by the check), 3 target error, 4 timeout, 5 unsupported.
 
 The interpreter's behaviour is checked against the real thing: the scripts in `tests/cmm/` were run in the free TRACE32 instruction-set simulator, and their recorded output (`*.expected`) must match cmmrun's line for line.
 
@@ -45,7 +45,7 @@ Each command writes Markdown and JSON reports: `reports/cmmrun-scan.md`/`.json` 
 Options:
 - `--ext .cmm .inc`: which extensions to read (default `.cmm`).
 - `--private`: real names, for your own use. The output files get a `-PRIVATE` suffix. **Never share them.**
-- `--private-map map.json`: writes a local id → real-name table, so you can look up what `u3fa9c1` or `F0042` refers to. **Never share it.**
+- `--private-map map.json`: writes a local id → real-name table, so you can look up what `u3fa9c10e` or `F0042` refers to. **Never share it.**
 - `check --hints hints.yaml`: known values for macros the analysis can't work out, e.g. `{"*": {"cmd": ["Data.Set"]}}`.
 - `--exclude GLOB ...`: skip directories or files by name or relative path, e.g. `--exclude old '*/archive/*'`.
 - `--jobs N`: parallel directory listings and file reads (default 16).
@@ -56,8 +56,8 @@ Options:
 Start with `inventory`. It lists and hashes the scripts without parsing them, and prints how much distinct script text there is, a rough memory and time estimate for `scan`/`check`, and the top-level directories that hold the most. Its directory list shows real names, so it is for your eyes only.
 
 ```powershell
-cmmrun inventory \\server\share\scripts
-cmmrun scan      \\server\share\scripts --exclude old '*/archive/*' --jobs 32 --out reports
+cmmrun inventory Z:\scripts
+cmmrun scan      Z:\scripts --exclude old '*/archive/*' --jobs 32 --out reports
 ```
 
 What makes big trees cheap:
@@ -67,12 +67,12 @@ What makes big trees cheap:
 - Links and junctions are never followed, so a link loop can't trap the walk. Version-control and virtualenv directories are skipped.
 - Unreadable files and directories are counted in the report, not silently dropped.
 
-Measured on this machine: 40,000 files (mostly copies) take about 10 s for `scan` and 11 s for `check`. Distinct script text costs about 3.5 s and 60 MiB of memory per MiB, so a few hundred MiB of distinct scripts is fine on a normal PC; for more, split the run with `--exclude` or by subdirectory.
+Measured on a generated test tree of 40,000 files (mostly copies): about 10 s for `scan` and 11 s for `check`. Distinct script text costs about 3.5 s and 60 MiB of memory per MiB, so a few hundred MiB of distinct scripts is fine on a normal PC; for more, split the run with `--exclude` or by subdirectory.
 
 ### What the anonymized report contains
 
 - Command, function and option names **only if they are in the public PRACTICE vocabulary** (extracted from Lauterbach's published manuals; see `tools/build_vocab.py`).
-- Every other name (custom commands, typos, labels, file names) becomes a salted id such as `u3fa9c1`. Files become `F0001`, `F0002`, … The salt is random per machine (`~/.cmmrun/salt`), so the ids mean nothing elsewhere.
+- Every other name (custom commands, typos, labels, file names) becomes a salted id such as `u3fa9c10e`. Files become `F0001`, `F0002`, … The salt is random per machine (`~/.cmmrun/salt`), so the ids mean nothing elsewhere.
 - No arguments, addresses, strings, comments or paths. Code shapes use placeholders, e.g. `Data.Set <ac>:&m1 %Long <num>`.
 - `SYStem.CPU` appears only as a core family (`cortex_m`, `cortex_r`, …).
 - A final **leak guard** checks every word in the report against an allowlist and replaces anything unexpected with `[redacted]`. The report header shows the count, which should be 0. If it isn't, please report it as a bug (without the report).
@@ -99,14 +99,14 @@ For every entry script (a file no other file calls), the worst verdict in its ca
 | BLOCKED | uses an unsupported command or function |
 | BROKEN | missing callee or label, parse problem, or a TRACE32 install-dir script (`~~/...`) |
 
-It also ranks blockers: "this command appears in N blocked scripts and alone blocks M of them."
+It also ranks blockers: "this command appears in N blocked scripts and is the only blocker in M of them" (adding it moves those M out of BLOCKED, though some may then be DYNAMIC).
 
 ## The J-Link backend and its safety rules
 
 Needs `pip install -e .[jlink]` and the J-Link Software Pack from SEGGER. Copy [examples/target.example.yaml](examples/target.example.yaml) to `target.yaml` (gitignored), fill in the probe serial from `cmmrun probes`, then:
 
 ```powershell
-cmmrun run demo\run_test.cmm --backend jlink --target target.yaml --log runs\log.json
+cmmrun run my_script.cmm --backend jlink --target target.yaml --log runs\log.json
 ```
 
 Other SEGGER probes, such as the J-Link built into a dev kit, may be plugged into the same PC, so:
@@ -114,11 +114,14 @@ Other SEGGER probes, such as the J-Link built into a dev kit, may be plugged int
 - **The probe is always chosen by serial number.** Without one, `run` stops. Nothing lets the J-Link software pick a probe.
 - **Deny list.** `deny_serials` in `target.yaml` and in `~/.cmmrun/probes.yaml` (machine-wide) lists probes that are never opened. A denied serial is refused before the J-Link DLL is even loaded.
 - **Probes are listed through the OS USB device list**, which doesn't open them. The chosen serial must be present.
-- **On-board J-Links are refused** unless `probe.allow_onboard: true`: a probe that appears as a USB composite device with serial ports, or whose product name says `OB`.
+- **On-board J-Links are refused** unless `probe.allow_onboard: true`: a probe that appears as a USB composite device (dev-kit J-Links usually add a virtual COM port), or whose product name says `OB`.
+- **Config values are read as text**, so a serial with leading zeros such as `000123456789` is the decimal number `cmmrun probes` shows, never an octal number. A malformed `target.yaml` or `probes.yaml` stops the run (exit 3).
 - **No firmware updates.** Automatic probe firmware updates are disabled before the probe is opened. (pylink's `disable_dialog_boxes()` is not used, because it sends `SilentUpdateFW`.)
 - **Never unsecures a locked chip**, which would mass-erase it.
-- **An unpowered target is a clean exit 3** (VTref below `min_vtref_mv`), before any connect.
-- `run` checks the whole script tree before it touches the target. Unsupported means exit code 5, with no connection made.
+- **An unpowered target is a clean exit 3** (VTref below `min_vtref_mv`). VTref is checked every time the script connects.
+- **Flash:** between `FLASH.ReProgram ALL` (or `FLASH.Program`, `FLASH.AUTO`) and `... OFF`, writes inside the `FLASH.Create` ranges (or the device's flash, from the J-Link device database) are collected and programmed in one J-Link flash download. Writes elsewhere, e.g. to RAM, happen at once.
+- `SYStem.CONFIG.DEBUGPORTTYPE SWD|JTAG` and `SYStem.JtagClock` override `interface` and `speed` from `target.yaml`. A clock without a unit is in Hz, as in TRACE32; `RTCK` means adaptive clocking.
+- `run` checks the whole script tree before it touches the target. Unsupported means exit code 5, and a broken script exit code 2, with no connection made.
 
 ## Development
 

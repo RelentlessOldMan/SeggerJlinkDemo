@@ -171,7 +171,13 @@ def test_parse_pnp():
 
 
 def test_khz():
-    assert J._khz("4MHz") == 4000 and J._khz("500kHz") == 500 and J._khz("auto") == "auto" and J._khz(1000) == 1000
+    assert J._khz("4MHz") == 4000 and J._khz("500kHz") == 500 and J._khz("auto") == "auto"
+    assert J._khz("1000000.") == 1000                   # SYStem.JtagClock without a unit is Hz
+    assert J._khz("1000", default_unit="khz") == 1000   # target.yaml speed: is kHz
+    assert J._khz("RTCK") == "adaptive" and J._khz("CTCK 10MHz") == 10000
+    for bad in ("1Hz", "100MHz", "fast"):
+        with pytest.raises(TargetError):
+            J._khz(bad)
 
 
 def test_run_cli_unpowered_exit_3(fake, tmp_path, capsys):
@@ -199,3 +205,118 @@ def test_run_cli_needs_target(fake, tmp_path):
     s = tmp_path / "s.cmm"
     s.write_text("ENDDO\n")
     assert main(["run", str(s), "--backend", "jlink"]) == 3
+
+
+def test_leading_zero_serials_are_decimal_not_octal(fake, tmp_path):
+    # YAML 1.1 reads 0123 as octal; serials must be read as text
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "probes.yaml").write_text("deny_serials: [000123456701]\n")
+    t = tmp_path / "target.yaml"
+    t.write_text("probe: {serial: 000111222333}\ndeny_serials: [000444555666, '000777']\n")
+    c = J.load_config(t)
+    assert c.serial == GOOD
+    assert {123456701, KIT, 777} <= c.deny_serials
+
+
+@pytest.mark.parametrize("text,match", [
+    ("probe: {serial: 1, allow_onboard: maybe}\n", "true or false"),
+    ("probe: {serial: 1}\ndeny_serials: 444555666\n", "must be a list"),
+    ("probe: {serial: 1}\ndeny_serials: [abc]\n", "not a probe serial"),
+    ("probe: {serial: 1}\nspeed: fast\n", "cannot use"),
+    ("probe: {serial: 1}\nmin_vtref_mv: lots\n", "whole number"),
+    ("probe: [serial\n", "not valid YAML"),
+])
+def test_bad_config_is_a_target_error(fake, tmp_path, text, match):
+    t = tmp_path / "target.yaml"
+    t.write_text(text)
+    with pytest.raises(TargetError, match=match):
+        J.load_config(t)
+
+
+def test_config_values(fake, tmp_path):
+    t = tmp_path / "target.yaml"
+    t.write_text("probe: {serial: 1, allow_onboard: yes}\nspeed: 4000\nmin_vtref_mv: 1500\n")
+    c = J.load_config(t)
+    assert c.allow_onboard is True and c.speed == 4000 and c.min_vtref_mv == 1500
+
+
+def test_register_map_prefers_whole_names():
+    regs = J.register_map([(0, "R13 (SP)"), (1, "R15 (PC)"), (2, "CFBP (CONTROL/FAULTMASK/BASEPRI/PRIMASK)"),
+                           (3, "CONTROL"), (4, "XPSR")])
+    assert regs["SP"] == regs["R13"] == 0 and regs["PC"] == 1
+    assert regs["CONTROL"] == 3 and regs["CFBP"] == 2 and regs["CPSR"] == 4
+    assert "FAULTMASK" not in regs                  # only reachable through CFBP
+
+
+def test_go_and_break_check_the_probe(fake):
+    b = J.JLinkBackend(cfg())
+    b.connect("up")
+    fake["jl"].restart = lambda: False
+    with pytest.raises(TargetError, match="could not start"):
+        b.go()
+    fake["jl"].halted_ = False
+    with pytest.raises(TargetError, match="already running"):
+        b.go()
+    fake["jl"].halt = lambda: False
+    with pytest.raises(TargetError, match="did not halt"):
+        b.halt()
+
+
+def test_short_transfers_are_errors(fake):
+    b = J.JLinkBackend(cfg())
+    b.connect("up")
+    fake["jl"].memory_read8 = lambda a, n: [0] * (n - 1)
+    with pytest.raises(TargetError, match="got 3 of 4"):
+        b.read("D", 0x20000000, 4)
+    fake["jl"].memory_write8 = lambda a, d: len(d) - 1
+    with pytest.raises(TargetError, match="wrote 1 of 2"):
+        b.write("D", 0x20000000, b"\x01\x02")
+
+
+def test_power_checked_on_every_connect(fake):
+    b = J.JLinkBackend(cfg())
+    b.connect("up")
+    b.disconnect() if hasattr(b, "disconnect") else None
+    fake["jl"].vtref = 0
+    with pytest.raises(TargetError, match="not powered"):
+        b.connect("up")
+
+
+def test_flash_queue_only_takes_flash_addresses(fake):
+    b = J.JLinkBackend(cfg())
+    b.connect("up")
+    b.flash_add_range(0x08000000, 0x080FFFFF)
+    b.flash_begin()
+    b.write("D", 0x20000000, b"\x11")             # RAM: written now (e.g. a flash algorithm's buffer)
+    b.write("P", 0x08000000, b"\xAA")
+    assert fake["jl"].mem == {0x20000000: 0x11}
+    assert b.read("P", 0x08000000, 1) == b"\xAA"   # queued data is visible before programming
+    b.flash_end()
+    assert [c for c in fake["jl"].calls if c[0] == "flash"] == [("flash", 0x08000000, b"\xAA")]
+
+
+def test_bad_jlink_dll_is_a_target_error(monkeypatch):
+    import pylink
+
+    def boom(*a, **k):
+        raise TypeError("Expected to be given a valid DLL.")
+    monkeypatch.setattr(pylink, "JLink", boom)
+    with pytest.raises(TargetError, match="J-Link Software Pack"):
+        J._make_jlink(cfg())
+
+
+@pytest.mark.parametrize("kind,text,match", [
+    ("ihex", ":0400000001020304F2\n:02000000\n", "length"),
+    ("ihex", ":04000000010203\n", "length"),
+    ("srecord", "S1050000AA\n", "length"),
+    ("ihex", ":zz\n", "not a valid"),
+    ("elf", "\x7fELF", "not an ELF"),
+])
+def test_bad_images_are_script_errors(tmp_path, kind, text, match):
+    from cmmrun.backends.images import load_image
+    from cmmrun.interp.values import PracticeError
+    f = tmp_path / "img"
+    f.write_bytes(text.encode("latin-1"))
+    with pytest.raises(PracticeError, match=match):
+        load_image(f, kind)

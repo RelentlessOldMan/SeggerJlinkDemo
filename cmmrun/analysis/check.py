@@ -17,14 +17,15 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from .. import __version__, dataflow
-from ..corpus import Corpus, resolve_path
+from ..corpus import Corpus, entry_files, resolve_path
 from ..lang import lexer
 from ..lang.parser import call_target, jump_target, parse_statement, walk
 from .anonymize import Anonymizer
-from .support import Support
+from .support import Support, user_commands
 
 ORDER = ["RUNNABLE", "RESOLVED", "DYNAMIC", "BLOCKED", "BROKEN"]
-BROKEN_ISSUES = {"unbalanced_close", "unclosed_block", "binary_or_nul_bytes", "unterminated_string"}
+BROKEN_ISSUES = {"unbalanced_close", "unclosed_block", "binary_or_nul_bytes", "unterminated_string",
+                 "nesting_too_deep"}
 
 
 @dataclass
@@ -46,15 +47,36 @@ class FileResult:
         return "RUNNABLE"
 
 
+class HintsError(ValueError):
+    pass
+
+
 def load_hints(path: str | None) -> dict[str, dict[str, set[str]]]:
-    """hints.yaml: {"<file glob>": {"macro_name": ["value", ...]}}. Local file, never shared."""
+    """hints.yaml: {"<file glob>": {"macro_name": ["value", ...]}}. Local file, never shared.
+    Values are read as plain text (ON stays ON, 0x10 stays 0x10)."""
     if not path:
         return {}
+    if isinstance(path, dict):          # already loaded (the CLI loads it before the scan)
+        return path
     import yaml
-    with open(path, encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh) or {}
-    return {g: {str(k).lstrip("&"): {str(x) for x in (v if isinstance(v, list) else [v])}
-                for k, v in (m or {}).items()} for g, m in raw.items()}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = yaml.load(fh, Loader=yaml.BaseLoader) or {}
+    except OSError as e:
+        raise HintsError(f"cannot read hints file {path}: {e.strerror or e}") from None
+    except yaml.YAMLError as e:
+        raise HintsError(f"hints file {path} is not valid YAML: {e}") from None
+    if not isinstance(raw, dict) or not all(isinstance(m, dict) or not m for m in raw.values()):
+        raise HintsError(f'hints file {path}: expected {{"<file glob>": {{"<macro>": ["value", ...]}}}}')
+    out = {}
+    for g, m in raw.items():
+        out[g] = {}
+        for k, v in (m or {}).items():
+            vals = v if isinstance(v, list) else [v]
+            if not all(isinstance(x, str) for x in vals):
+                raise HintsError(f"hints file {path}: values for {g}/{k} must be a list of plain values")
+            out[g][str(k).lstrip("&")] = set(vals)
+    return out
 
 
 def _entry_names(pf) -> list[str]:
@@ -84,14 +106,8 @@ def check(c: Corpus, anon: Anonymizer, backend: str = "jlink", hints: str | None
     hint_map = load_hints(hints)
     fids = anon.file_ids(c.files)
 
-    user_cmds = set()
-    for f in c.files.values():
-        if f.pf:
-            for st in walk(f.pf.stmts):
-                if st.kind == "command" and st.canon == "GLOBALON":
-                    pos = [a for a in st.args if not lexer.is_option(a)]
-                    if len(pos) > 1 and pos[0].upper() == "CMD":
-                        user_cmds.add(pos[1].upper())
+    # The declaring ON/GLOBALON CMD line is what blocks; its uses are not reported again as unknown.
+    user_cmds = user_commands(st for f in c.files.values() if f.pf for st in walk(f.pf.stmts))
 
     # ---- macro values: per-file flows, then propagate caller arguments/LOCALs to callees
     flows, global_names = {}, {}
@@ -161,6 +177,9 @@ def check(c: Corpus, anon: Anonymizer, backend: str = "jlink", hints: str | None
         elif canon:
             if sup.command(canon) == "unsupported":
                 res.blockers.add(("command", canon))
+            elif sup.unsupported_event(st):
+                ev = sup.unsupported_event(st)
+                res.blockers.add(("command", ev if v.is_word(ev.split(" ", 1)[1]) else "ON <other>"))
         else:
             res.blockers.add(("unknown_command", anon.command(st)))
         for fn in st.functions:
@@ -221,11 +240,7 @@ def check(c: Corpus, anon: Anonymizer, backend: str = "jlink", hints: str | None
                 res.resolved += 1
 
     # ---- trees
-    callers = c.callers()
-    for src, dsts in dyn_edges.items():
-        for d in dsts:
-            callers.setdefault(d, set()).add(src)
-    entries = sorted((r for r in c.files if not callers.get(r)), key=lambda r: fids[r])
+    entries = sorted(entry_files(c, dyn_edges), key=lambda r: fids[r])
 
     def tree(rel):
         seen, stack, depth = set(), [(rel, 0)], 0

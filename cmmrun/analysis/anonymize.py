@@ -3,7 +3,7 @@
 Rules:
 - Public PRACTICE/TRACE32 vocabulary (command, function, option and keyword
   names from the public manuals) is shown as is.
-- Any other name becomes a stable salted id such as `u3fa9c1`. The salt is
+- Any other name becomes a stable salted id such as `u3fa9c10e`. The salt is
   random per machine (stored in ~/.cmmrun/salt), so ids are stable between
   runs on one machine but mean nothing elsewhere.
 - File paths become F0001..., numbered in salted-hash order (not alphabetical).
@@ -25,22 +25,40 @@ from ..lang import lexer
 from ..lang.parser import Stmt, functions_in
 from ..lang.vocab import Vocab
 
-ID_RE = re.compile(r"^(u[0-9a-f]{6}|F\d{4,}|m\d+)$")
+ID_LEN = 8          # hex chars: about 1 % collision chance at 9,000 distinct names
+ID_RE = re.compile(r"^(u[0-9a-f]{%d}|F\d{4,}|m\d+)$" % ID_LEN)
+NON_ASCII_RE = re.compile(r"[^\x20-\x7e\t\n]+")
+MIN_SALT = 16
 WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
+class SaltError(Exception):
+    pass
+
+
 def load_salt(path: str | None = None) -> bytes:
+    """The per-machine secret behind the ids. Created only if the file is missing; an existing
+    file that is not a valid salt is an error (never overwritten), because a weak or empty salt
+    would let anyone test guessed names against the ids."""
     p = pathlib.Path(path) if path else pathlib.Path.home() / ".cmmrun" / "salt"
-    try:
-        return bytes.fromhex(p.read_text().strip())
-    except (OSError, ValueError):
-        salt = secrets.token_bytes(16)
+    if p.exists():
         try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(salt.hex())
-        except OSError:
-            pass
+            salt = bytes.fromhex(p.read_text(encoding="ascii").strip())
+        except (OSError, ValueError, UnicodeDecodeError):
+            raise SaltError(f"salt file {p} is not a hex salt; not touching it (delete it to make a new one)") from None
+        if len(salt) < MIN_SALT:
+            raise SaltError(f"salt file {p} holds {len(salt)} bytes, need at least {MIN_SALT} "
+                            "(delete it to make a new one)")
         return salt
+    salt = secrets.token_bytes(32)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "x", encoding="ascii") as fh:
+            fh.write(salt.hex())
+    except OSError as e:
+        raise SaltError(f"cannot create salt file {p}: {e}. Ids would change on every run; "
+                        "use --salt-file with a writable path") from None
+    return salt
 
 
 class Anonymizer:
@@ -52,7 +70,7 @@ class Anonymizer:
 
     # -- ids
     def hid(self, token: str, kind: str = "u") -> str:
-        h = hmac.new(self.salt, f"{kind}:{token.upper()}".encode(), hashlib.sha256).hexdigest()[:6]
+        h = hmac.new(self.salt, f"{kind}:{token.upper()}".encode(), hashlib.sha256).hexdigest()[:ID_LEN]
         ident = "u" + h
         self.private_map.setdefault(ident, token)
         return ident
@@ -162,6 +180,15 @@ class Anonymizer:
                     out.append(" ")
                 i += 1
                 continue
+            if not c.isascii() or not c.isprintable():
+                # names in other scripts, lookalike letters, non-ASCII digits: never shown
+                j = i + 1
+                while j < n and (not text[j].isascii() or text[j].isalnum() or text[j] == "_"):
+                    j += 1
+                if not out or out[-1] != "<id>":
+                    out.append("<id>")
+                i = j
+                continue
             out.append(c)
             i += 1
         s = "".join(out).strip()
@@ -210,10 +237,14 @@ def guard(data, vocab: Vocab, allowed_terms: set[str]) -> tuple[object, int]:
     allowed_upper = {t.upper() for t in allowed_terms}
 
     def cheap_ok(w: str) -> bool:
-        return bool(ID_RE.match(w)) or w.upper() in allowed_upper or vocab.is_word(w)
+        return bool(ID_RE.match(w)) or w == "redacted" or w.upper() in allowed_upper or vocab.is_word(w)
 
     def known_name(w: str) -> bool:
-        return vocab.command(w).status == "known" or vocab.function(w).status == "known"
+        # canonical spellings only: an abbreviation ("eva" for Eval) could be a private word
+        for m in (vocab.command(w), vocab.function(w)):
+            if m.status == "known" and m.canon.upper() == w.upper():
+                return True
+        return False
 
     def ok_word(w: str) -> bool:
         return cheap_ok(w) or known_name(w)
@@ -238,6 +269,12 @@ def guard(data, vocab: Vocab, allowed_terms: set[str]) -> tuple[object, int]:
                 return name
             return WORD_RE.sub(rep, name)
 
+        def rep_other(m):
+            nonlocal count
+            count += 1
+            return "[redacted]"
+
+        s = NON_ASCII_RE.sub(rep_other, s)
         return re.sub(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", rep_dotted, s)
 
     def walk(x):

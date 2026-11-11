@@ -132,3 +132,11 @@ class MockBackend(Backend):
     def flash_end(self):
         self.flash_open = False
         super().flash_end()
+
+    def flash_erase(self, lo: int | None = None, hi: int | None = None):
+        self._need()
+        ranges = [(lo, hi)] if lo is not None else self.flash_ranges
+        for a, b in ranges:
+            for x in range(a, b + 1):
+                self.mem[x] = 0xFF
+        self.log("flash_erase", lo=lo, hi=hi)

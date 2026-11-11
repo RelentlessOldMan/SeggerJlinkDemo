@@ -5,10 +5,11 @@ import re
 from collections import Counter, defaultdict
 
 from .. import __version__, dataflow
-from ..corpus import Corpus, call_depths
+from ..corpus import Corpus, call_depths, entry_files
 from ..lang import lexer
 from ..lang.parser import call_target, walk
 from .anonymize import Anonymizer
+from .support import user_commands
 
 CPU_FAMILIES = [
     (re.compile(r"CORTEX-?M|^CM\d|STM32|NRF5|NRF9|EFR32|EFM32|SAM[DLEC]|ATSAM|LPC|KINETIS|MK\d|"
@@ -96,13 +97,7 @@ def scan(c: Corpus, anon: Anonymizer, max_examples: int = 3) -> dict:
     depth_hist = Counter()
     macro_names_per_file = []
 
-    for f in c.files.values():
-        if f.pf:
-            for st in walk(f.pf.stmts):
-                if st.kind == "command" and st.canon in ("ON", "GLOBALON"):
-                    pos = [a for a in st.args if not lexer.is_option(a)]
-                    if len(pos) > 1 and pos[0].upper() == "CMD":
-                        user_cmds.add(pos[1].upper())
+    user_cmds |= user_commands(st for f in c.files.values() if f.pf for st in walk(f.pf.stmts))
 
     def feature(name, rel, n=1):
         feat[name] += n
@@ -286,7 +281,7 @@ def scan(c: Corpus, anon: Anonymizer, max_examples: int = 3) -> dict:
                 called.add(e.dst)
     callers_of = c.callers()
     has_out = {f.rel for f in c.files.values() if any(e.dst for e in f.edges)}
-    roots = [r for r in c.files if r not in called]
+    roots = entry_files(c)
     depths, n_cyclic = call_depths(c)
     root_depth = Counter(str(depths.get(r, 0)) for r in roots if r in has_out)
     fan_in = Counter(_bucket(len(callers_of.get(r, ())), (0, 1, 2, 5, 10, 20, 50)) for r in c.files)

@@ -56,7 +56,7 @@ def test_preflight_dynamic_needs_flag(tmp_path):
 def test_preflight_follows_do_and_checks_labels(tmp_path, capsys):
     _script(tmp_path, "callee.cmm", "GOSUB nowhere\nENDDO\n")
     s = _script(tmp_path, "main.cmm", 'DO "~~~~/callee.cmm"\nENDDO\n')
-    assert main(["run", s]) == 5
+    assert main(["run", s]) == 2            # a missing label is a broken script, not an unsupported one
     assert "nowhere" in capsys.readouterr().err
 
 
@@ -88,7 +88,47 @@ def test_check_cli(tmp_path):
 
 def test_private_map_written_only_on_request(tmp_path):
     salt = tmp_path / "salt"
+    out = tmp_path / "reports"
     pm = tmp_path / "map.json"
-    main(["scan", str(CORPUS), "--out", str(tmp_path), "--salt-file", str(salt), "--private-map", str(pm)])
-    m = json.loads(pm.read_text())
+    assert main(["scan", str(CORPUS), "--out", str(out), "--salt-file", str(salt), "--private-map", str(pm)]) == 0
+    assert not pm.exists()
+    m = json.loads((tmp_path / "map-PRIVATE.json").read_text())
     assert any("Quuxify" in v or "ZORBLAX" in v for v in m.values())
+
+
+def test_bad_paths_fail_fast(tmp_path, capsys):
+    salt = tmp_path / "salt"
+    out = tmp_path / "reports"
+    base = ["--out", str(out), "--salt-file", str(salt)]
+    assert main(["scan", str(tmp_path / "nope")] + base) == 2
+    assert main(["scan", str(CORPUS)] + base + ["--private-map", str(out / "m.json")]) == 2
+    (tmp_path / "d-PRIVATE").mkdir()
+    assert main(["scan", str(CORPUS)] + base + ["--private-map", str(tmp_path / "d-PRIVATE")]) == 2
+    f = tmp_path / "file"
+    f.write_text("x")
+    assert main(["scan", str(CORPUS), "--out", str(f), "--salt-file", str(salt)]) == 2
+    bad = tmp_path / "salt-bad"
+    bad.write_text("zz")
+    assert main(["scan", str(CORPUS), "--out", str(out), "--salt-file", str(bad)]) == 2
+    assert bad.read_text() == "zz"
+    h = tmp_path / "h.yaml"
+    h.write_text("- not a mapping" + chr(10))
+    assert main(["check", str(CORPUS)] + base + ["--hints", str(h)]) == 2
+    h.write_text("{")
+    assert main(["check", str(CORPUS)] + base + ["--hints", str(h)]) == 2
+    err = capsys.readouterr().err
+    assert "Traceback" not in err and "does not exist" in err
+
+
+def test_hints_stay_strings(tmp_path):
+    from cmmrun.analysis.check import load_hints
+    h = tmp_path / "h.yaml"
+    h.write_text('"*": {flag: [ON, 0x10, 010]}' + chr(10))
+    assert load_hints(str(h)) == {"*": {"flag": {"ON", "0x10", "010"}}}
+
+
+def test_private_report_header(tmp_path):
+    out = tmp_path / "r"
+    assert main(["scan", str(CORPUS), "--out", str(out), "--private", "--quiet"]) == 0
+    md = next(out.glob("*-PRIVATE.md")).read_text(encoding="utf-8")
+    assert "PRIVATE report" in md and "only public PRACTICE names" not in md

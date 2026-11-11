@@ -63,6 +63,8 @@ class Corpus:
 
 
 def _line_endings(data: bytes) -> str:
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        data = data.decode("utf-16", errors="replace").encode("utf-8")
     crlf = data.count(b"\r\n")
     lf = data.count(b"\n") - crlf
     cr = data.count(b"\r") - crlf
@@ -161,12 +163,26 @@ def discover(root: pathlib.Path, exts: tuple[str, ...], excludes: tuple[str, ...
 
 def _read(path: str) -> bytes:
     with open(path, "rb") as fh:
-        return fh.read()      # size already checked from the listing; read(n) would allocate n bytes
+        return fh.read(MAX_BYTES + 1)     # bounded even if the file grew after it was listed
+
+
+def _long_root(root: pathlib.Path) -> pathlib.Path:
+    """On Windows, use the extended-length form so directories deeper than 260 characters can be
+    listed (otherwise they look unreadable). Rel paths are unaffected."""
+    if os.name != "nt":
+        return root
+    s = str(root)
+    ext = "\\\\?\\"
+    if s.startswith(ext):
+        return root
+    if s.startswith("\\\\"):
+        return pathlib.Path(ext + "UNC\\" + s[2:])
+    return pathlib.Path(ext + s)
 
 
 def load_corpus(root: str | os.PathLike, exts=(".cmm",), vocab: Vocab | None = None,
                 excludes: tuple[str, ...] = (), jobs: int = 16, progress: bool = False) -> Corpus:
-    root = pathlib.Path(root).resolve()
+    root = _long_root(pathlib.Path(root).resolve())
     v = vocab or load()
     prog = Progress(progress)
     found, skipped = discover(root, tuple(e.lower() for e in exts),
@@ -232,7 +248,7 @@ EST_SECONDS_PER_FILE = 0.00025  # on a local disk; a network share adds its late
 
 def _hash_file(path: str) -> tuple[bytes, int]:
     with open(path, "rb") as fh:
-        data = fh.read()
+        data = fh.read(MAX_BYTES + 1)
     return hashlib.blake2b(data, digest_size=16).digest(), len(data)
 
 
@@ -240,20 +256,37 @@ def inventory(root: str | os.PathLike, exts=(".cmm",), excludes: tuple[str, ...]
               progress: bool = False, top: int = 15) -> dict:
     """Cheap first look at a big tree: list and hash the scripts without parsing them.
     Tells how much distinct script text there is, and estimates what a full scan costs."""
-    root = pathlib.Path(root).resolve()
+    root = _long_root(pathlib.Path(root).resolve())
     prog = Progress(progress)
     found, skipped = discover(root, tuple(e.lower() for e in exts),
                               tuple(x.lower().replace("\\", "/") for x in excludes), jobs, prog)
     seen: set[bytes] = set()
     total = distinct = ndistinct = 0
     by_top: dict[str, list[int]] = {}     # top-level dir -> [files, bytes, distinct bytes]
+    def hashed(ex):
+        # a bounded window of jobs, like load_corpus, so memory doesn't grow with the file count
+        window = max(4, 4 * jobs)
+        queue: deque = deque()
+        it = iter(found)
+        for item in itertools.islice(it, window):
+            queue.append((item, ex.submit(_safe_hash, item[0])))
+        while queue:
+            item, fut = queue.popleft()
+            nxt = next(it, None)
+            if nxt is not None:
+                queue.append((nxt, ex.submit(_safe_hash, nxt[0])))
+            yield item, fut.result()
+
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
-        for n, ((path, rel, size), res) in enumerate(zip(found, ex.map(_safe_hash, (f[0] for f in found))), 1):
+        for n, ((path, rel, size), res) in enumerate(hashed(ex), 1):
             prog(f"hashing: {n}/{len(found)} scripts")
             if res is None:
                 skipped["unreadable"] += 1
                 continue
             key, nbytes = res
+            if nbytes > MAX_BYTES:
+                skipped["too_large"] += 1
+                continue
             top_dir = rel.split("/", 1)[0] if "/" in rel else "."
             row = by_top.setdefault(top_dir, [0, 0, 0])
             row[0] += 1
@@ -337,33 +370,88 @@ def _resolve_edges(c: Corpus, f: FileInfo, lower_index):
                 f.gosub_unresolved += 1
 
 
+def sccs(graph: dict[str, set[str]]) -> list[list[str]]:
+    """Strongly connected components (iterative Tarjan), callees before callers."""
+    index, low, on, stack, out = {}, {}, set(), [], []
+    counter = 0
+    for root in graph:
+        if root in index:
+            continue
+        work = [(root, iter(sorted(graph.get(root, ()))))]
+        index[root] = low[root] = counter
+        counter += 1
+        stack.append(root)
+        on.add(root)
+        while work:
+            v, it = work[-1]
+            pushed = False
+            for w in it:
+                if w not in graph:
+                    continue
+                if w not in index:
+                    index[w] = low[w] = counter
+                    counter += 1
+                    stack.append(w)
+                    on.add(w)
+                    work.append((w, iter(sorted(graph.get(w, ())))))
+                    pushed = True
+                    break
+                if w in on:
+                    low[v] = min(low[v], index[w])
+            if pushed:
+                continue
+            work.pop()
+            if work:
+                low[work[-1][0]] = min(low[work[-1][0]], low[v])
+            if low[v] == index[v]:
+                comp = []
+                while True:
+                    w = stack.pop()
+                    on.discard(w)
+                    comp.append(w)
+                    if w == v:
+                        break
+                out.append(sorted(comp))
+    return out
+
+
+def call_graph(c: Corpus, extra: dict[str, set[str]] | None = None) -> dict[str, set[str]]:
+    g = {r: {e.dst for e in f.edges if e.dst and e.dst in c.files} for r, f in c.files.items()}
+    for src, dsts in (extra or {}).items():
+        g.setdefault(src, set()).update(d for d in dsts if d in c.files)
+    return g
+
+
+def entry_files(c: Corpus, extra: dict[str, set[str]] | None = None) -> list[str]:
+    """Files nothing else calls. A script that calls itself still counts, and a group of scripts
+    that only call each other (a DO cycle with no outside caller) is represented by its first file."""
+    g = call_graph(c, extra)
+    comp_of = {}
+    comps = sccs(g)
+    for i, comp in enumerate(comps):
+        for r in comp:
+            comp_of[r] = i
+    called = {comp_of[d] for src, ds in g.items() for d in ds if comp_of[d] != comp_of[src]}
+    return [comp[0] for i, comp in enumerate(comps) if i not in called]
+
+
 def call_depths(c: Corpus) -> tuple[dict[str, int], int]:
-    """Longest DO-chain depth from each file (cycles cut), and the number of cyclic files."""
-    memo: dict[str, int] = {}
-    on_stack: set[str] = set()
-    cyclic: set[str] = set()
-
-    def depth(rel: str) -> int:
-        if rel in memo:
-            return memo[rel]
-        if rel in on_stack:
-            cyclic.add(rel)
-            return 0
-        on_stack.add(rel)
+    """Longest DO-chain depth from each file (a cycle counts as one step), and the number of
+    files that are part of a cycle (including scripts that call themselves)."""
+    g = call_graph(c)
+    comps = sccs(g)                     # callees first
+    comp_of = {r: i for i, comp in enumerate(comps) for r in comp}
+    cdepth: list[int] = []
+    cyclic = 0
+    for i, comp in enumerate(comps):
+        members = set(comp)
+        if len(comp) > 1 or any(r in g[r] for r in comp):
+            cyclic += len(comp)
         d = 0
-        for e in c.files[rel].edges:
-            if e.dst and e.dst in c.files:
-                d = max(d, 1 + depth(e.dst))
-        on_stack.discard(rel)
-        memo[rel] = d
-        return d
-
-    import sys
-    old = sys.getrecursionlimit()
-    sys.setrecursionlimit(max(old, 20000))
-    try:
-        for rel in c.files:
-            depth(rel)
-    finally:
-        sys.setrecursionlimit(old)
-    return memo, len(cyclic)
+        for r in comp:
+            for dst in g[r]:
+                if dst not in members:
+                    d = max(d, 1 + cdepth[comp_of[dst]])
+        cdepth.append(d)
+    memo = {r: cdepth[comp_of[r]] for r in g}
+    return memo, cyclic

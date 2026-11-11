@@ -26,6 +26,7 @@ class Backend(abc.ABC):
         self.events: list[Event] = []
         self.cpu = ""
         self.options: dict[str, str] = {}
+        self.flash_ranges: list[tuple[int, int]] = []    # from FLASH.Create
 
     def log(self, op: str, **detail):
         self.events.append(Event(round(self.now(), 6), op, detail))
@@ -92,6 +93,17 @@ class Backend(abc.ABC):
 
     def flash_end(self):
         self.log("flash_end")
+
+    def flash_add_range(self, lo: int, hi: int):
+        self.flash_ranges.append((lo, hi))
+        self.log("flash_range", lo=lo, hi=hi)
+
+    def flash_clear_ranges(self):
+        self.flash_ranges = []
+
+    def flash_erase(self, lo: int | None = None, hi: int | None = None):
+        """Erase the whole flash (lo is None) or a range. Erased flash reads as 0xFF."""
+        raise NotImplementedError
 
     def close(self):
         if self.connected:

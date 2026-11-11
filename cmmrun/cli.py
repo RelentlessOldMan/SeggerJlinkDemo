@@ -37,9 +37,53 @@ def _write(out_dir: str, stem: str, data: dict, md: str) -> tuple[pathlib.Path, 
     return jp, mp
 
 
+class UsageError(Exception):
+    pass
+
+
+def _prepare(a, stem: str):
+    """Check every path and input before a (possibly slow) load of the tree."""
+    from .analysis.anonymize import SaltError, load_salt
+    root = pathlib.Path(a.root)
+    if not root.exists():
+        raise UsageError(f"{a.root} does not exist")
+    if not root.is_dir():
+        raise UsageError(f"{a.root} is not a directory")
+    out = pathlib.Path(a.out)
+    if out.exists() and not out.is_dir():
+        raise UsageError(f"--out {a.out} is a file, not a directory")
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise UsageError(f"cannot create --out {a.out}: {e.strerror or e}") from None
+    if getattr(a, "private_map", None):
+        pm = pathlib.Path(a.private_map)
+        if "PRIVATE" not in pm.name.upper():
+            pm = pm.with_name(f"{pm.stem}-PRIVATE{pm.suffix or '.json'}")
+        if pm.is_dir():
+            raise UsageError(f"--private-map {pm} is a directory")
+        if pm.resolve().parent == out.resolve():
+            raise UsageError("--private-map must not be in the --out directory, next to the reports "
+                             "you are going to share")
+        a.private_map = str(pm)
+    if getattr(a, "hints", None):
+        from .analysis.check import load_hints
+        try:
+            a.hints = load_hints(a.hints)
+        except ValueError as e:
+            raise UsageError(str(e)) from None
+    if not a.private:
+        try:
+            a.salt = load_salt(a.salt_file)
+        except SaltError as e:
+            raise UsageError(str(e)) from None
+    else:
+        a.salt = b"\0" * 16
+
+
 def _anon(a, vocab):
-    from .analysis.anonymize import Anonymizer, load_salt
-    return Anonymizer(vocab, load_salt(a.salt_file), enabled=not a.private)
+    from .analysis.anonymize import Anonymizer
+    return Anonymizer(vocab, a.salt, enabled=not a.private)
 
 
 def _finish(a, anon, vocab, data, stem, render):
@@ -67,6 +111,9 @@ def _mib(n: int) -> str:
 def cmd_inventory(a) -> int:
     from .corpus import inventory
     t0 = time.time()
+    if not pathlib.Path(a.root).is_dir():
+        print(f"cmmrun: {a.root} is not an existing directory", file=sys.stderr)
+        return EXIT_SCRIPT
     r = inventory(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet, top=a.top)
     if not r["files"]:
         print(f"no files with extensions {a.ext} under {a.root}", file=sys.stderr)
@@ -92,6 +139,11 @@ def cmd_scan(a) -> int:
     from .analysis.scan import scan
     from .corpus import load_corpus
     t0 = time.time()
+    try:
+        _prepare(a, "cmmrun-scan")
+    except UsageError as e:
+        print(f"cmmrun: {e}", file=sys.stderr)
+        return EXIT_SCRIPT
     c = load_corpus(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet)
     if not c.files:
         print(f"no files with extensions {a.ext} under {a.root}", file=sys.stderr)
@@ -108,6 +160,11 @@ def cmd_check(a) -> int:
     from .analysis.check import check
     from .analysis.report import check_markdown
     from .corpus import load_corpus
+    try:
+        _prepare(a, "cmmrun-check")
+    except UsageError as e:
+        print(f"cmmrun: {e}", file=sys.stderr)
+        return EXIT_SCRIPT
     c = load_corpus(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet)
     if not c.files:
         print(f"no files with extensions {a.ext} under {a.root}", file=sys.stderr)
@@ -175,7 +232,7 @@ def main(argv=None) -> int:
     p.add_argument("--backend", default="mock", choices=["mock", "jlink"])
     p.add_argument("--target", help="target.yaml (required for jlink)")
     p.add_argument("--allow-dynamic", action="store_true", help="allow lines whose command is only known at run time")
-    p.add_argument("--dry-run", action="store_true", help="run against the mock backend first")
+    p.add_argument("--dry-run", action="store_true", help="run on the mock target instead of hardware, to check the script first")
     p.add_argument("--timeout", type=float, default=600.0)
     p.add_argument("--log", help="write a JSON log of target changes here")
     p.set_defaults(func=cmd_run)

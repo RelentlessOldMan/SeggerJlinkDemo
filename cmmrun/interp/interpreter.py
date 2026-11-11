@@ -72,6 +72,8 @@ class Program:
         pf = parse_bytes(path.read_bytes(), vocab)
         if "unbalanced_close" in pf.issues or "unclosed_block" in pf.issues:
             raise PracticeError(f"{path.name}: unbalanced ( ) blocks")
+        if "nesting_too_deep" in pf.issues:
+            raise PracticeError(f"{path.name}: too many statements chained on one line")
         self.vocab = vocab
         self.ins: list[Stmt] = []
         for st in pf.stmts:
@@ -93,12 +95,6 @@ class Program:
             self.ins.append(st)
             if inner:
                 self._flatten(inner)
-            return
-        if st.kind == "command" and st.args and st.args[-1] == "(" and st.inline is None:
-            # `ELSE (` / `WHILE cond (` written on one line.
-            st.args = st.args[:-1]
-            self.ins.append(st)
-            self.ins.append(Stmt("block_open", st.lineno, "("))
             return
         if st.inline is not None:
             # IF c <stmt>: the inline statement is the body; flatten its own blocks too.
@@ -223,7 +219,7 @@ SCREEN SCREEN.ON SCREEN.OFF SCREEN.display SCREEN.WAIT SCREEN.ALways
 Mode.Hll Mode.Asm Mode.Mix TOOLBAR STATUSBAR MENU.ReProgram MENU.RESet BEEP
 List List.auto Register.view Data.List Data.dump Data.View PER.view SETUP.Var SETUP.LIST
 TITLE FramePOS SYStem.Option.ResBreak SYStem.Option.EnReset SYStem.Option.IMASKASM
-SYStem.Option.IMASKHLL SYStem.MemAccess SYStem.CpuAccess SYStem.CONFIG.DEBUGPORTTYPE
+SYStem.Option.IMASKHLL SYStem.MemAccess SYStem.CpuAccess
 """.split())
 
 
@@ -243,6 +239,14 @@ SIZES = {"Byte": 1, "Word": 2, "Long": 4, "Quad": 8, "Short": 2, "TByte": 3, "PB
          "SByte": 7}
 PRINT_FMT = {"Decimal": "dec", "Hex": "hex", "BINary": "bin", "Ascii": "ascii"}
 FORMATS = list(SIZES) + list(PRINT_FMT) + ["LE", "BE", "CONTinue", "ERROR", "WARNING", "COLOR", "LINE"]
+
+
+MAX_CALL_DEPTH = 100
+
+
+def _os_message(e: OSError) -> str:
+    name = pathlib.Path(e.filename).name if e.filename else ""
+    return f"{name}: {e.strerror or e}" if name else str(e.strerror or e)
 
 
 def _fmt_name(tok: str) -> str:
@@ -270,6 +274,7 @@ class Interpreter:
         self.t32_sys = t32_sys
         self.globals: dict[str, str] = {}
         self.frame: Frame | None = None
+        self._depth = 0
         self.programs: dict[pathlib.Path, Program] = {}
         self.files = Files()
         self.found = False
@@ -440,8 +445,15 @@ class Interpreter:
         if time.monotonic() - self._t0 > self.timeout or self.backend.now() - self._v0 > self.timeout:
             raise Timeout(f"timeout after {self.timeout:g} s")
 
+    def _enter(self):
+        self._depth += 1
+        if self._depth > MAX_CALL_DEPTH:
+            self._depth -= 1
+            raise PracticeError(f"PRACTICE stack overflow: more than {MAX_CALL_DEPTH} nested DO/GOSUB calls")
+
     def _do(self, path: pathlib.Path, args: list[str], parent: Frame | None) -> list[str]:
         prog = self.program(path)
+        self._enter()
         saved = self.frame
         self.frame = Frame("script", parent, prog, entry_args=list(args))
         try:
@@ -453,6 +465,7 @@ class Interpreter:
             raise PracticeError("#pra_stackun: PRACTICE stack underflow (RETURN outside a subroutine)") from None
         finally:
             self.frame = saved
+            self._depth -= 1
 
     def _gosub(self, prog: Program, name: str, args: list[str]) -> list[str]:
         if name in prog.labels:
@@ -462,6 +475,7 @@ class Interpreter:
             start, end = i + 1, prog.unit_end(i)
         else:
             raise PracticeError(f"label not found: {name}")
+        self._enter()
         saved = self.frame
         self.frame = Frame("gosub", saved, prog, entry_args=list(args))
         try:
@@ -471,6 +485,7 @@ class Interpreter:
             return r.values
         finally:
             self.frame = saved
+            self._depth -= 1
 
     def _run_level(self, prog: Program, start: int, end: int):
         """Run [start, end) at the current call level; GOTOs to this level jump here."""
@@ -574,7 +589,8 @@ class Interpreter:
         end = prog.unit_end(i)
         if st.args:
             self._cur = (prog, st)
-            count = to_int(self.eval(self.substitute(" ".join(st.args))), "RePeaT count")
+            count = self._guard(lambda: to_int(self.eval(self.substitute(" ".join(st.args))), "RePeaT count"),
+                                prog, st, default=0)
             for _ in range(max(0, count)):
                 self._check_time()
                 self._body(prog, i + 1, st.inline)
@@ -591,30 +607,33 @@ class Interpreter:
     def _guard(self, fn, prog, st, default=None):
         try:
             return fn()
-        except (PracticeError, TargetError) as e:
-            if isinstance(e, UnsupportedError):
+        except OSError as oe:
+            e = PracticeError(_os_message(oe))
+        except (PracticeError, TargetError) as pe:
+            if isinstance(pe, UnsupportedError):
                 raise
-            h = self._handler()
-            if h is None or self._in_handler:
-                raise
-            frame, (action, target) = h
-            self.last_error = str(e)
-            if action == "CONTINUE":
-                return default
-            if action == "GOTO":
-                idx = frame.prog.labels.get(target)
-                if idx is None:
-                    raise PracticeError(f"ON ERROR GOTO: label not found: {target}") from e
-                raise Goto(idx, frame) from None
-            self._in_handler = True
-            try:
-                if action == "GOSUB":
-                    self._gosub(frame.prog, target, [])
-                elif action == "DO":
-                    self._do(self.resolve_script(target, frame), [], self.frame)
-            finally:
-                self._in_handler = False
+            e = pe
+        h = self._handler()
+        if h is None or self._in_handler:
+            raise e
+        frame, (action, target) = h
+        self.last_error = str(e)
+        if action == "CONTINUE":
             return default
+        if action == "GOTO":
+            idx = frame.prog.labels.get(target)
+            if idx is None:
+                raise PracticeError(f"ON ERROR GOTO: label not found: {target}") from e
+            raise Goto(idx, frame) from None
+        self._in_handler = True
+        try:
+            if action == "GOSUB":
+                self._gosub(frame.prog, target, [])
+            elif action == "DO":
+                self._do(self.resolve_script(target, frame), [], self.frame)
+        finally:
+            self._in_handler = False
+        return default
 
     def _handler(self):
         f = self.frame
@@ -714,7 +733,7 @@ class Interpreter:
     def _take(self, st: Stmt, values: list[str], private: bool):
         args = list(st.args)
         line_mode = False
-        if args and _fmt_name(args[0]) == "LINE":
+        if args and args[0].startswith("%") and _fmt_name(args[0]) == "LINE":
             line_mode, args = True, args[1:]
         names = [a.lstrip("&") for a in args if a.startswith("&")]
         if line_mode and names:
@@ -723,11 +742,24 @@ class Interpreter:
         for k, n in enumerate(names):
             v = values[k] if k < len(values) else ""
             if private:
-                level.privates[n] = v
+                own = self._declared_here(n)
+                (own if own is not None else level.privates)[n] = v
             elif self._lookup(n):
                 self.set_macro(n, v)
             else:
                 level.locals[n] = v
+
+    def _declared_here(self, name: str) -> dict | None:
+        """The LOCAL/PRIVATE dict of the current call level (or its blocks) that declares name."""
+        f = self.frame
+        while f is not None:
+            for d in (f.locals, f.privates):
+                if name in d:
+                    return d
+            if f.kind != "block":
+                return None
+            f = f.parent
+        return None
 
     def c_entry(self, st: Stmt):
         self._take(st, self.frame.call_level().entry_args, private=False)
@@ -838,8 +870,12 @@ class Interpreter:
         limit = float(times[0]) if times else None
         start = self.backend.now()
         if not cond:
-            self.backend.sleep(limit or 0)
-            return
+            while True:                 # sleep in slices so --timeout still applies
+                self._check_time()
+                left = (limit or 0) - (self.backend.now() - start)
+                if left <= 0:
+                    return
+                self.backend.sleep(min(0.1, left))
         text = " ".join(cond)
         while not truth(self.eval(text)):
             self._check_time()
@@ -875,7 +911,7 @@ class Interpreter:
             raise PracticeError("READ #<n> expected")
         ch = st.args[0].lstrip("#")
         rest = st.args[1:]
-        line_mode = bool(rest) and _fmt_name(rest[0]) == "LINE"
+        line_mode = bool(rest) and rest[0].startswith("%") and _fmt_name(rest[0]) == "LINE"
         names = [a.lstrip("&") for a in rest if a.startswith("&")]
         line = self.files.readline(ch)
         vals = [line] if line_mode else line.split()
@@ -924,7 +960,15 @@ class Interpreter:
     @command("SYStem.JtagClock", target=True)
     def c_clock(self, st: Stmt):
         if st.args:
-            self.backend.set_option("clock", st.args[0])
+            self.backend.set_option("clock", " ".join(self._raw_args(st.args)))
+
+    @command("SYStem.CONFIG.DEBUGPORTTYPE", target=True)
+    def c_debugport(self, st: Stmt):
+        a = self._raw_args(st.args)
+        port = a[0].upper() if a else ""
+        if port not in ("SWD", "JTAG"):
+            raise UnsupportedError(f"SYStem.CONFIG.DEBUGPORTTYPE {port or '?'}: only SWD and JTAG are supported")
+        self.backend.set_option("interface", port.lower())
 
     @command("SYStem.Up", "SYStem.Mode.Up", target=True)
     def c_up(self, st: Stmt):
@@ -1017,6 +1061,8 @@ class Interpreter:
             raise PracticeError("Data.Set: no value")
         if isinstance(where, Rng):
             access, lo, n = where.lo.access, where.lo.v, where.hi - where.lo.v + 1
+            if n <= 0:
+                raise PracticeError(f"Data.Set: empty address range 0x{where.lo.v:X}--0x{where.hi:X}")
             data = (bytes(payload) * (n // len(payload) + 1))[:n]
         else:
             access = where.access if isinstance(where, Addr) else ""
@@ -1072,22 +1118,53 @@ class Interpreter:
         data = self.backend.read(r.lo.access, r.lo.v, r.hi - r.lo.v + 1)
         self.resolve_host_path(pos[0]).write_bytes(data)
 
-    @command("FLASH.RESet", "FLASH.Create", "FLASH.TARGET", "FLASH.CLEAR", "FLASH.AUTO", target=True)
+    @command("FLASH.TARGET", "FLASH.CLEAR", target=True)
     def c_flash_cfg(self, st: Stmt):
+        # the J-Link DLL brings its own flash loader: TRACE32's flash algorithm setup is not needed
         self.backend.log("flash_config", cmd=st.canon)
 
-    @command("FLASH.ReProgram", target=True)
+    @command("FLASH.RESet", target=True)
+    def c_flash_reset(self, st: Stmt):
+        self.backend.flash_clear_ranges()
+        self.backend.log("flash_config", cmd=st.canon)
+
+    def _flash_range(self, args: list[str]) -> Rng | None:
+        for a in args[:2]:          # FLASH.Create <unit> <range> ...  or  FLASH.Erase <range>
+            try:
+                r = self.eval(a)
+            except PracticeError:
+                continue
+            if isinstance(r, Rng):
+                return r
+        return None
+
+    @command("FLASH.Create", target=True)
+    def c_flash_create(self, st: Stmt):
+        r = self._flash_range(self._raw_args(st.args))
+        if r is None:
+            raise PracticeError("FLASH.Create: address range expected, e.g. FLASH.Create 1. 0x0--0xFFFF ...")
+        self.backend.flash_add_range(r.lo.v, r.hi)
+
+    @command("FLASH.ReProgram", "FLASH.Program", "FLASH.AUTO", target=True)
     def c_flash_reprogram(self, st: Stmt):
+        # all three collect writes to flash and program them when switched OFF
         a = [x.upper() for x in self._raw_args(st.args)]
         if "OFF" in a:
             self.backend.flash_end()
         else:
-            self._need_target("FLASH.ReProgram")
+            self._need_target(st.canon)
             self.backend.flash_begin()
 
-    @command("FLASH.Erase", "FLASH.Program", connected=True)
-    def c_flash_op(self, st: Stmt):
-        self.backend.log("flash_op", cmd=st.canon, args=" ".join(st.args))
+    @command("FLASH.Erase", connected=True)
+    def c_flash_erase(self, st: Stmt):
+        a = self._raw_args(st.args)
+        if not a or a[0].upper() == "ALL":
+            self.backend.flash_erase()
+            return
+        r = self._flash_range(a)
+        if r is None:
+            raise PracticeError("FLASH.Erase: ALL or an address range expected")
+        self.backend.flash_erase(r.lo.v, r.hi)
 
 
 class _RunRequest(Exception):

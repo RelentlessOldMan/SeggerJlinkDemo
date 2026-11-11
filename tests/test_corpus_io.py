@@ -88,5 +88,30 @@ def test_inventory(tmp_path, capsys):
 
 def test_guard_still_redacts_and_keeps_ids():
     v = load()
-    data, n = guard({"files": "F0001 u1a2b3c Data.Set SYS.U secretname m7"}, v, {"files"})
-    assert data["files"] == "F0001 u1a2b3c Data.Set SYS.U [redacted] m7" and n == 1
+    data, n = guard({"files": "F0001 u1a2b3c4d Data.Set SYStem.Up secretname m7 SYS.U eva"}, v, {"files"})
+    assert data["files"] == "F0001 u1a2b3c4d Data.Set SYStem.Up [redacted] m7 [redacted].[redacted] [redacted]" and n == 4
+
+
+def test_guard_redacts_non_ascii():
+    v = load()
+    data, n = guard({"files": "Data.Set секрет ｚｅｂｒａ 東京 m1"}, v, {"files"})
+    assert data["files"].isascii() and "Data.Set" in data["files"] and n == 3
+
+
+def test_shape_hides_non_ascii():
+    from cmmrun.analysis.anonymize import Anonymizer
+    a = Anonymizer(load(), b"k" * 16)
+    s = a.shape("секрет ｚｅｂｒａ Ζebrα ١٢٣٤٥ 東京工場 &d")
+    assert s.isascii() and "ebr" not in s
+
+
+def test_salt_file_rules(tmp_path):
+    from cmmrun.analysis.anonymize import SaltError, load_salt
+    new = tmp_path / "salt"
+    assert len(load_salt(str(new))) >= 16 and load_salt(str(new)) == load_salt(str(new))
+    for bad in ("", "00", "my important notes"):
+        f = tmp_path / "bad"
+        f.write_text(bad)
+        with pytest.raises(SaltError):
+            load_salt(str(f))
+        assert f.read_text() == bad          # never overwritten

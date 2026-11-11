@@ -93,6 +93,8 @@ def tokenize(s: str) -> list[Tok]:
                          and not (j + len(u) < n and (s[j + len(u)].isalnum() or s[j + len(u)] == "_"))), None)
             if unit and not t.lower().startswith(("0x", "0y")):
                 num = t.rstrip(".")
+                if not re.fullmatch(r"[0-9]+(?:\.[0-9]*)?", num):
+                    raise PracticeError(f"unexpected character in hex constant: {s[i:j + len(unit)]}")
                 out.append(Tok("num", s[i:j + len(unit)], i, Time(Fraction(num) * TIME_UNITS[unit]), sp))
                 i = j + len(unit)
                 continue
@@ -313,6 +315,8 @@ def binop(op: str, a: Value, b: Value) -> Value:
             return Time(x + y if op == "+" else x - y)
         if op == "*":
             return Time(x * y)
+        if op == "/" and y == 0:
+            raise PracticeError("division by zero")
         if op == "/" and isinstance(b, Time):
             return Flt(x / y)
         if op == "/":

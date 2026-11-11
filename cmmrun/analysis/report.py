@@ -59,13 +59,19 @@ def _kv(d: dict) -> str:
     return ", ".join(f"`{k}` {v}" for k, v in d.items())
 
 
+def _header_note(r: dict) -> str:
+    if not r.get("anonymized"):
+        return "> **PRIVATE report: real names and paths. Do not share it.**"
+    return "> Review this report before sharing it. It should contain only public PRACTICE names, counts, and ids."
+
+
 def scan_markdown(r: dict, top: int = 60) -> str:
     c = r["corpus"]
     t = c["totals"]
     L = []
     L.append("# cmmrun scan report")
     L.append("")
-    L.append("> Review this report before sharing it. It should contain only public PRACTICE names, counts, and ids.")
+    L.append(_header_note(r))
     L.append("")
     L.append(f"Tool {r['tool_version']}, schema `{r['schema']}`, anonymized: **{r['anonymized']}**. "
              "Names not in the public PRACTICE vocabulary appear as `u......` ids; files as `F....`.")
@@ -153,7 +159,7 @@ def scan_markdown(r: dict, top: int = 60) -> str:
 
 def check_markdown(r: dict, top_blockers: int = 30, list_files: int = 200) -> str:
     L = ["# cmmrun check report", ""]
-    L.append("> Review this report before sharing it. It should contain only public PRACTICE names, counts, and ids.")
+    L.append(_header_note(r))
     L.append("")
     L.append(f"Tool {r['tool_version']}, schema `{r['schema']}`, anonymized: **{r['anonymized']}**.")
     if "leak_guard_redactions" in r:
@@ -168,7 +174,7 @@ def check_markdown(r: dict, top_blockers: int = 30, list_files: int = 200) -> st
         L.append(_kv(r["verdicts"][scope]))
         L.append("")
     L.append(f"## Top blockers (entry scripts)")
-    L.append("`unblocks alone` = entry scripts that become runnable if only this item is added.")
+    L.append("`unblocks alone` = entry scripts for which this is the only blocker. Adding it makes them RUNNABLE, RESOLVED or DYNAMIC (they may still need `--allow-dynamic`).")
     L.append("")
     L.append(_table(r["blockers"], ["name", "kind", "appears_in", "unblocks_alone"],
                     ["item", "kind", "blocked entry scripts", "unblocks alone"], top_blockers))

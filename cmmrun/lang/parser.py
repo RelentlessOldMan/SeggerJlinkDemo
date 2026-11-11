@@ -84,22 +84,29 @@ def functions_in(s: str) -> list[str]:
     return FUNC_RE.findall(no_str)
 
 
-def parse_statement(code: str, lineno: int, v: Vocab) -> Stmt | None:
+MAX_INLINE = 64     # statements chained on one line (`IF a IF b ...`, `( ( (`); deeper is an issue
+
+
+def parse_statement(code: str, lineno: int, v: Vocab, _depth: int = 0) -> Stmt | None:
     s = code.strip()
     if not s:
         return None
-    s = lexer.DEVICE_PREFIX_RE.sub("", s, count=1)
+    s = lexer.DEVICE_PREFIX_RE.sub("", s, count=1).strip()
+    if not s:
+        return None             # a device prefix alone (`B::`) is a no-op
+    if _depth > MAX_INLINE:
+        return Stmt("too_deep", lineno, s)
     if m := BLOCK_OPEN_RE.match(s):
         st = Stmt("block_open", lineno, s, block_mode=m.group(1) or "")
         rest = s[m.end():].strip()
         if rest:
-            st.inline = parse_statement(rest, lineno, v)
+            st.inline = parse_statement(rest, lineno, v, _depth + 1)
         return st
     if s.startswith(")"):
         st = Stmt("block_close", lineno, s)
         rest = s[1:].strip()
         if rest:
-            st.inline = parse_statement(rest, lineno, v)
+            st.inline = parse_statement(rest, lineno, v, _depth + 1)
         return st
     if m := ASSIGN_RE.match(s):
         rhs = m.group(3).strip()
@@ -108,16 +115,25 @@ def parse_statement(code: str, lineno: int, v: Vocab) -> Stmt | None:
         st.functions = functions_in(rhs)
         return st
     toks = lexer.split_args(s)
+    if not toks:
+        return None
     cmd, args = toks[0], toks[1:]
     st = Stmt("command", lineno, s, cmd=cmd, match=_cmd_match(v, cmd))
     canon = st.canon
-    if canon in INLINE_AFTER_FIRST or (canon == "ELSE" and args and args[0].upper() != "IF"):
+    if canon in ("IF", "ELSE", "WHILE", "RePeaT") and args and args[-1] == "(":
+        # `IF cond (`, `ELSE (`, `WHILE cond (`: the block opens on this line
+        st.inline = Stmt("block_open", lineno, "(")
+        args = args[:-1]
+    elif canon in INLINE_AFTER_FIRST or (canon == "ELSE" and args and args[0].upper() != "IF"):
         head = args[:1] if canon != "ELSE" else []
         rest = args[len(head):]
         if rest:
-            inner = parse_statement(" ".join(rest), lineno, v)
+            inner = parse_statement(" ".join(rest), lineno, v, _depth + 1)
             # Only accept a real command; otherwise this is part of an expression.
-            if inner and inner.kind == "command" and inner.match.status == "known":
+            if inner and inner.kind == "too_deep":
+                st.inline = inner
+                args = head
+            elif inner and inner.kind == "command" and inner.match.status == "known":
                 st.inline = inner
                 args = head
     st.args = args
@@ -221,6 +237,10 @@ def parse_text(text: str, v: Vocab | None = None) -> ParsedFile:
             continue
         chain = st
         while chain is not None:
+            if chain.kind == "too_deep":
+                issues.append("nesting_too_deep")
+                chain.depth = depth
+                break
             if chain.kind == "block_close":
                 depth -= 1
                 if depth < 0:

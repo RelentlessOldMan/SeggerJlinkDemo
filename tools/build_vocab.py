@@ -23,7 +23,8 @@ RE_WORD = re.compile(r"(?<![<A-Za-z0-9_])/?([A-Za-z][A-Za-z0-9_]*)")
 EXTRA_CMDS = """SYStem.Up SYStem.Down SYStem.Attach SYStem.NoDebug SYStem.StandBy SYStem.Prepare
 CD Mode.Hll Mode.Asm Mode.Mix FLASH.TARGET FLASH.TARGET2 FLASH.AUTO FLASH.CFI
 Go Step Break SYStem.Mode.Attach SYStem.Mode.Up SYStem.Mode.Go SYStem.Mode.Down
-SYStem.Mode.NoDebug SYStem.Mode.Prepare SYStem.Mode.StandBy SYStem.CONFIG.DEBUGPORTTYPE""".split()
+SYStem.Mode.NoDebug SYStem.Mode.Prepare SYStem.Mode.StandBy SYStem.CONFIG.DEBUGPORTTYPE
+Data.LOAD.Ihex Data.LOAD.Srecord Data.List FLASH.CLEAR Register.RESet SETUP.LIST SYStem.CpuAccess WinEXT""".split()
 EXTRA_FUNCS = """TRUE FALSE Register Data.Long Data.Byte Data.Word Data.Quad Data.Short Data.Float
 Data.String CPU FOUND STATE.RUN PRACTICE.ARG""".split()
 

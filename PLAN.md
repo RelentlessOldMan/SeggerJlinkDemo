@@ -6,7 +6,7 @@ TRACE32, PRACTICE and PowerView are Lauterbach trademarks. This project is indep
 
 ## Goal
 
-Show that the routine things a debugger does on a test bench can run on a ~$500 J-Link with the existing `.cmm` scripts left exactly as they are:
+Show that the routine things a debugger does can run on a SEGGER J-Link, with `.cmm` scripts left exactly as they are:
 - connect and reset
 - flash an image
 - read and write memory (peek/poke)
@@ -22,7 +22,7 @@ Out of scope: trace, multicore, OS awareness, MMU/cache work, and TRACE32's GUI.
 | **A. Interpreter: parse `.cmm`, drive J-Link through pylink** | None, within the supported subset | No | **Chosen.** Full control flow (IF/WHILE/GOSUB/macros), deterministic errors, works in CI |
 | B. Transpiler: `.cmm` to J-Link Commander script | None | No | Only works for straight-line scripts. Commander scripts have no IF and can't use a read value, so a script like `IF Data.Long(D:x)==1` can't be translated. Kept as an optional export later |
 | C. Real TRACE32 PowerView as a GDB front-end to J-Link GDB Server | None | Yes (GDB front-end licence); unlicensed it runs as a 10-minute demo | Worth a one-hour experiment as a data point. It is not a replacement, because it still needs TRACE32 licences |
-| D. Rewrite the scripts in Python | Every script | No | This is what we want to avoid. It is the fallback for scripts outside the subset |
+| D. Rewrite the scripts in Python | Every script | No | The thing this project avoids. It stays the fallback for scripts outside the subset |
 
 ## Architecture
 
@@ -147,7 +147,7 @@ Verdicts gain one level:
   2. optionally run a recovery script named in `target.yaml`
   3. exit with code 5
 - The log lists every target change made before the stop: memory written, flash programmed, registers set.
-- `--dry-run` runs the script against MockBackend, or a recording backend, first. It finds problems on the likely path without touching hardware. This is a filter, not a guarantee, because values read from a real target may send the script down a different path.
+- `--dry-run` runs the script on MockBackend instead of the hardware. It finds problems on the likely path without touching a target. This is a filter, not a guarantee, because values read from a real target may send the script down a different path.
 
 **Closing the loop without editing scripts:**
 - **Observed values:** each real run (private mode) writes the values that dynamic lines actually took. `check --observed runs/` adds them to the analysis, so over time DYNAMIC scripts become RESOLVED with real evidence.
@@ -208,7 +208,7 @@ The parser has two modes: lenient for `scan` (always finishes and records errors
    - (c) cmmrun on the real board through the J-Link.
 
    Compare the outputs; the diff should be empty. This needs no Lauterbach hardware.
-2. **The hardware demo** (target board + J-Link), run as `cmmrun demo/run_test.cmm` with no changes to the script. It:
+2. **The hardware demo** (target board + J-Link; not written yet), a `.cmm` script run with no changes. It:
    - connects
    - flashes the demo firmware
    - pokes a "test number" into a RAM mailbox
@@ -218,7 +218,7 @@ The parser has two modes: lenient for `scan` (always finishes and records errors
    - dumps a RAM window to a file
 
    Then the recovery script: mass erase, reflash, verify.
-3. **If a real Lauterbach probe is ever available:** run the same set through T32Backend on the same board and diff flash hash, registers and mailbox. This is the A/B the hardware story ultimately needs.
+3. **With a real Lauterbach probe** (not part of this project's setup): the same set could run through a T32 backend on the same board, diffing flash hash, registers and mailbox.
 4. **Soak:** loop flash, run, check a few hundred times and report the failure count and timing.
 
 ## Phases
@@ -227,7 +227,7 @@ The parser has two modes: lenient for `scan` (always finishes and records errors
 |---|---|---|---|
 | 0 | Setup: git repo, Python package skeleton, pytest. Install the J-Link Software Pack (SEGGER download; you accept the licence), Arm GNU Toolchain, `pylink-square` | No | Builds and tests run |
 | 1 | Write from scratch the public demo `.cmm` scripts, the language test scripts, and a synthetic "messy collection" (calls, `~~/` references, unknown commands, odd encodings) to test scan/check against | No | `demo/`, `tests/cmm/`, `tests/corpus/` |
-| 2 | Lexer, parser, vocabulary and support table; then **`scan`** with anonymization | No | **First usable tool**: can be run on any private collection right away |
+| 2 | Lexer, parser, vocabulary and support table; then **`scan`** with anonymization | No | **First usable tool**: can be run on any script collection right away |
 | 3 | Call graph, static macro tracking and **`check`** (verdicts incl. RESOLVED, blocker ranking, `--explain`, hints) | No | Runnable/blocked report |
 | 3b | Interpreter core, MockBackend and **`run`** | No | Scripts run against a fake target |
 | 4 | Install the TRACE32 simulator and T32Backend; A/B the language semantics | No | Diff report, sim vs cmmrun |
@@ -236,7 +236,7 @@ The parser has two modes: lenient for `scan` (always finishes and records errors
 | 7 | Optional: pyOCD/OpenOCD backend (shows the same scripts on a $15 CMSIS-DAP probe), Commander export, GDB front-end experiment | Optional | Extras |
 | 8 | README, demo GIF/log, publish to GitHub | No | Public repo |
 
-Phases 1–4 can start today, before the J-Link is plugged in. `scan` and `check` come first on purpose: the results from your private scripts then set the order in which commands get implemented in the interpreter, so we build what the scripts actually use.
+Phases 1–4 need no J-Link. `scan` and `check` come first on purpose: their blocker ranking on a real script collection sets the order in which commands get implemented, so the interpreter covers what scripts actually use.
 
 ## Rules
 
@@ -249,5 +249,5 @@ Phases 1–4 can start today, before the J-Link is plugged in. `scan` and `check
 ## Open questions
 
 1. Target board: any unlocked Cortex-M board with reachable SWD pins (STM32, nRF52, SAMD, RP2040, ...). Until one is attached, all work is hardware-free.
-2. Is a real Lauterbach probe available at any point, or is the simulator the only TRACE32?
-3. J-Link model (BASE / PLUS / EDU)? EDU is fine for a hobby demo but not for commercial use.
+2. The TRACE32 simulator is the only TRACE32 reference; there is no Lauterbach probe in the setup.
+3. J-Link model: any current J-Link with SWD works. Check the licence terms SEGGER sets for your model.

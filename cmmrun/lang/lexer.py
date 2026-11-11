@@ -24,16 +24,19 @@ class Decoded:
 def decode(data: bytes) -> Decoded:
     """Decode script bytes. TRACE32 scripts are usually ASCII, Latin-1/CP1252 or UTF-8."""
     issues = []
-    if b"\x00" in data[:4096]:
-        if data.startswith((b"\xff\xfe", b"\xfe\xff")):
-            try:
-                return Decoded(data.decode("utf-16"), "utf-16", True)
-            except UnicodeDecodeError:
-                pass
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return Decoded(data.decode("utf-16"), "utf-16", True)
+        except UnicodeDecodeError:
+            pass
+    bom = data.startswith(b"\xef\xbb\xbf")
+    if bom:
+        data = data[3:]
+    if b"\x00" in data:
         issues.append("binary_or_nul_bytes")
-        return Decoded(data.replace(b"\x00", b"").decode("latin-1"), "binary?", False, issues)
-    if data.startswith(b"\xef\xbb\xbf"):
-        return Decoded(data[3:].decode("utf-8", errors="replace"), "utf-8", True)
+        return Decoded(data.replace(b"\x00", b"").decode("latin-1"), "binary?", bom, issues)
+    if bom:
+        return Decoded(data.decode("utf-8", errors="replace"), "utf-8", True)
     try:
         text = data.decode("ascii")
         return Decoded(text, "ascii")
@@ -87,6 +90,9 @@ def strip_comment(s: str) -> tuple[str, str, bool]:
                 in_str = False
         elif c == '"':
             in_str = True
+        elif c == "'" and i + 2 < n and s[i + 2] == "'":
+            i += 3              # character literal such as ';' or '"'
+            continue
         elif c == ";":
             return s[:i], s[i:], False
         elif c == "/" and s.startswith("//", i) and (i == 0 or s[i - 1] in " \t"):

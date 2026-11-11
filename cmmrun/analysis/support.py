@@ -9,6 +9,7 @@ skipped (window and GUI layout commands that do not change the target), and
 from __future__ import annotations
 
 from ..interp import functions
+from ..lang import lexer
 from ..interp.interpreter import COMMANDS, IGNORED, TARGET_COMMANDS
 
 # Handled by the interpreter's control flow rather than a command method.
@@ -33,3 +34,27 @@ class Support:
 
     def function(self, canon: str) -> bool:
         return canon in self.functions
+
+    @staticmethod
+    def unsupported_event(st) -> str | None:
+        """`ON <event>` is supported only for ERROR; the name of the unsupported form otherwise."""
+        if st.kind != "command" or st.canon != "ON":
+            return None
+        ev = on_event(st)
+        return None if ev == "ERROR" else f"ON {ev or '?'}"
+
+
+def on_event(st) -> str:
+    pos = [a for a in st.args if not lexer.is_option(a)]
+    return pos[0].upper() if pos else ""
+
+
+def user_commands(stmts) -> set[str]:
+    """Names declared as user-defined commands with ON CMD or GLOBALON CMD (upper case)."""
+    out = set()
+    for st in stmts:
+        if st.kind == "command" and st.canon in ("ON", "GLOBALON"):
+            pos = [a for a in st.args if not lexer.is_option(a)]
+            if len(pos) > 1 and pos[0].upper() == "CMD":
+                out.add(pos[1].upper())
+    return out

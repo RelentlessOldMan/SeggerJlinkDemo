@@ -1,46 +1,44 @@
-"""Read-only J-Link probe info. Opens ONLY the probe given by serial number,
-with automatic firmware update disabled. Does not connect to a target.
+"""Read-only J-Link probe info for the probe named in a target.yaml.
 
-usage: python tools/probe_info.py <serial> [--dll PATH] [--deny SERIAL ...]
+The probe is opened through cmmrun's J-Link backend, so every safety rule applies: the serial
+must be in target.yaml, deny lists (target.yaml and ~/.cmmrun/probes.yaml) are honoured, on-board
+probes are refused unless allowed, automatic firmware update is disabled before the probe is
+opened, and the opened probe's serial is checked. It does not connect to the target.
+
+usage: python tools/probe_info.py target.yaml
 """
 import argparse
 import sys
+from pathlib import Path
 
-import pylink
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from cmmrun.backends.jlink import JLinkBackend, load_config  # noqa: E402
+from cmmrun.interp.values import TargetError  # noqa: E402
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("serial", type=int)
-    ap.add_argument("--dll", help="path to JLink_x64.dll")
-    ap.add_argument("--deny", type=int, nargs="*", default=[])
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("target", help="target.yaml naming the probe by serial")
     a = ap.parse_args()
-
-    if a.serial in a.deny:
-        print(f"refusing: serial {a.serial} is on the deny list", file=sys.stderr)
-        return 3
-
-    lib = pylink.Library(a.dll) if a.dll else None
-    jl = pylink.JLink(lib=lib) if lib else pylink.JLink()
-    jl.disable_dialog_boxes()
-
-    print("DLL version     :", jl.version)
-    # Must run before open(): otherwise the DLL may reflash probe firmware.
-    jl.exec_command("DisableAutoUpdateFW")
-
-    jl.open(serial_no=a.serial)
     try:
+        b = JLinkBackend(load_config(a.target))
+        b._open(check_power=False)        # report VTref rather than refuse
+    except TargetError as e:
+        print(f"probe_info: {e}", file=sys.stderr)
+        return 3
+    jl = b.jl
+    try:
+        print("DLL version     :", jl.version)
         print("Product         :", jl.product_name)
         print("Serial          :", jl.serial_number)
         print("Hardware version:", jl.hardware_version)
         print("Firmware        :", jl.firmware_version)
-        print("Firmware outdated vs DLL:", jl.firmware_outdated())
-        st = jl.hardware_status
-        print(f"VTref           : {st.voltage} mV")
-        print("Capabilities    :", hex(jl.capabilities & 0xFFFFFFFF))
+        print("Firmware outdated vs DLL:", jl.firmware_outdated(), "(not updated automatically)")
+        print(f"VTref           : {jl.hardware_status.voltage} mV")
         print("Features        :", ", ".join(jl.features) or "(none)")
     finally:
-        jl.close()
+        b._close_probe()
     return 0
 
 

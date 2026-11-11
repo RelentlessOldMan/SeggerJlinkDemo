@@ -185,7 +185,7 @@ def _fbin(it, a, ev):
 @fn("FORMAT.STRing")
 def _fstr(it, a, ev):
     s, w, fill = _s(ev, a[0]), _i(ev, a[1]), sub_eval(ev, a[2])
-    ch = chr(to_int(fill)) if isinstance(fill, Num) else to_str(fill)[:1] or " "
+    ch = chr(to_int(fill) & 0xFF) if isinstance(fill, Num) else to_str(fill)[:1] or " "   # a byte, as in TRACE32
     return Str(s.ljust(w, ch) if w >= 0 else s.rjust(-w, ch))
 
 
@@ -279,11 +279,6 @@ def _arg(it, a, ev):
     args = it.frame.call_level().entry_args
     i = _i(ev, a[0])
     return Str(args[i] if 0 <= i < len(args) else "")
-
-
-@fn("Var.STRing")
-def _varstr(it, a, ev):
-    raise PracticeError("Var.STRing needs debug symbols, which cmmrun does not support")
 
 
 # ---- target
