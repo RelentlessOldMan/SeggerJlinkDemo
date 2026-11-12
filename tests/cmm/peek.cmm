@@ -1,0 +1,31 @@
+; peek: read memory and registers, formatted several ways.
+; Target workflow: inspect a live target's memory and CPU state.
+SYStem.CPU CortexM4
+SYStem.Up
+; seed some memory so the reads are deterministic (poke is exercised on its own)
+Data.Set SD:0x20000000 %Long 0xDEADBEEF
+Data.Set SD:0x20000004 %Long 0x00C0FFEE
+Data.Set SD:0x20000008 %Byte 0x11 0x22 0x33 0x44
+; --- word / half / byte reads
+PRINT "long :" Data.Long(SD:0x20000000)
+PRINT "word :" Data.Word(SD:0x20000000)
+PRINT "byte :" Data.Byte(SD:0x20000000)
+PRINT "high :" Data.Word(SD:0x20000002)
+; --- formatted
+PRINT "hex8 :" FORMAT.HEX(8,Data.Long(SD:0x20000004))
+PRINT "dec  :" FORMAT.Decimal(0,Data.Byte(SD:0x20000008))
+; --- a small walked dump, address : value
+&a=0x20000000
+&end=0x20000008
+WHILE &a<=&end
+(
+  PRINT "mem " FORMAT.HEX(8,&a) ": " FORMAT.HEX(8,Data.Long(SD:&a))
+  &a=&a+4
+)
+; --- registers
+Register.Set PC 0x08000400
+Register.Set R0 0x2A
+PRINT "pc   :" Register(PC)
+PRINT "r0   :" Register(R0)
+PRINT "run  :" STATE.RUN()
+ENDDO

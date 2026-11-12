@@ -70,10 +70,12 @@ def main(argv=None) -> int:
     ap.add_argument("args", nargs="*")
     a = ap.parse_args(argv)
     t32 = find_t32(a.t32)
+    # Scripts that need target execution have no simulator reference (see test_golden.NON_GOLDEN).
+    non_golden = {"run"}
     if a.record:
         for p in sorted(pathlib.Path(a.record).glob("*.cmm")):
-            if p.name.startswith("_"):
-                continue        # helper scripts called by the tests
+            if p.name.startswith("_") or p.stem in non_golden:
+                continue        # helper scripts, or scripts the simulator cannot run
             lines = run(p, [], t32)
             p.with_suffix(".expected").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
             print(f"{p.name}: {len(lines)} lines")

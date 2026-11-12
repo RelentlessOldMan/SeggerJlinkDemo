@@ -131,3 +131,21 @@ def test_preflight_follows_cd(tmp_path, capsys):
     (tmp_path / "sub" / "callee.cmm").write_text("PRINT 1\nENDDO\n")
     code, err = _run_cli(tmp_path, 'CD sub\nDO callee.cmm\nENDDO\n', capsys)
     assert code == 0, err
+
+
+def test_run_control(tmp_path):
+    # tests/cmm/run.cmm exercises reset -> go-to-address -> wait-for-halt -> read.
+    # The free simulator can't execute, so it is validated here on the mock backend.
+    import pathlib
+    src = (pathlib.Path(__file__).parent / "cmm" / "run.cmm").read_text(encoding="utf-8")
+    it = run(tmp_path, src)
+    assert it.out_lines == [
+        "sp    :20010000",     # initial SP from vector[0]
+        "pc    :8000400",      # reset handler from vector[1], thumb bit cleared
+        "halted:TRUE ",
+        "stop  :TRUE ",        # core halted after Go + WAIT
+        "atpc  :8000450",      # stopped at the Go target address
+        "r0    :2A",
+    ]
+    ops = [e.op for e in it.backend.events]
+    assert ops.index("reset") < ops.index("go")      # reset before run

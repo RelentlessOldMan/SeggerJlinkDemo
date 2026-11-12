@@ -1,0 +1,24 @@
+; reset / run control: reset to the vector table, run to a breakpoint, read state.
+; Validated on the mock backend only -- the free TRACE32 simulator cannot execute,
+; so this is not a golden test. On real hardware the program computes the result;
+; the mock models the reset -> go -> halt -> PC mechanics.
+SYStem.CPU CortexM4
+SYStem.Up
+; lay down a reset vector: initial SP at 0x0, reset handler at 0x4 (thumb bit set).
+; On real hardware these already live in flash; the mock needs them seeded.
+Data.Set SD:0x00000000 %Long 0x20010000
+Data.Set SD:0x00000004 %Long 0x08000401
+; reset the core to the vector table
+Register.RESet
+PRINT "sp    :" Register(SP)
+PRINT "pc    :" Register(PC)
+PRINT "halted:" STATE.HALT()
+; run to a breakpoint address, then wait up to 1s for the core to stop
+Go 0x08000450
+WAIT STATE.HALT() 1.s
+PRINT "stop  :" STATE.HALT()
+PRINT "atpc  :" Register(PC)
+; register read-back (on real hardware R0 holds the routine's return value)
+Register.Set R0 0x0000002A
+PRINT "r0    :" Register(R0)
+ENDDO

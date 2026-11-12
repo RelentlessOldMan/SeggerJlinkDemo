@@ -11,7 +11,12 @@ from cmmrun.backends.mock import MockBackend
 from cmmrun.interp.interpreter import Interpreter
 
 CMM = pathlib.Path(__file__).parent / "cmm"
-CASES = sorted(p for p in CMM.glob("*.cmm") if not p.name.startswith("_"))
+# Scripts that need target execution: the free Arm simulator cannot run code, so
+# there is no TRACE32 reference for them. They are validated on the mock backend
+# instead (see test_run_control in test_interp.py). Keep this in sync with t32sim.py.
+NON_GOLDEN = {"run"}
+CASES = sorted(p for p in CMM.glob("*.cmm")
+               if not p.name.startswith("_") and p.stem not in NON_GOLDEN)
 
 
 def run_script(path: pathlib.Path) -> list[str]:

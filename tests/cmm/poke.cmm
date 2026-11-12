@@ -1,0 +1,31 @@
+; poke: write memory and registers, then read back to verify.
+; Target workflow: patch a value in place and confirm it took.
+SYStem.CPU CortexM4
+SYStem.Up
+; --- write then verify a long
+Data.Set SD:0x20000100 %Long 0x12345678
+PRINT "w1 :" Data.Long(SD:0x20000100)
+; --- byte-wise write, read back as a long (little-endian target)
+Data.Set SD:0x20000110 %Byte 0x78 0x56 0x34 0x12
+PRINT "w2 :" Data.Long(SD:0x20000110)
+; --- overwrite one byte in the middle, check neighbours survive
+Data.Set SD:0x20000112 %Byte 0xAA
+PRINT "w3 :" Data.Long(SD:0x20000110)
+; --- explicit little-endian long, read back byte 0
+Data.Set SD:0x20000120 %LE %Long 0xAABBCCDD
+PRINT "w4 :" Data.Byte(SD:0x20000120)
+PRINT "w5 :" Data.Byte(SD:0x20000123)
+; --- verify helper: write, read, compare, report
+&want=0x0000CAFE
+Data.Set SD:0x20000130 %Long &want
+&got=Data.Long(SD:0x20000130)
+IF &got==&want
+  PRINT "verify: ok"
+ELSE
+  PRINT "verify: MISMATCH want " FORMAT.HEX(8,&want) " got " FORMAT.HEX(8,&got)
+; --- registers
+Register.Set R1 0xDEAD
+Register.Set SP 0x20010000
+PRINT "r1 :" Register(R1)
+PRINT "sp :" Register(SP)
+ENDDO

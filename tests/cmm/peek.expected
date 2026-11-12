@@ -1,0 +1,12 @@
+long :0DEADBEEF
+word :0BEEF
+byte :0EF
+high :0DEAD
+hex8 :00C0FFEE
+dec  :17
+mem 20000000: DEADBEEF
+mem 20000004: 00C0FFEE
+mem 20000008: 44332211
+pc   :8000400
+r0   :2A
+run  :FALSE

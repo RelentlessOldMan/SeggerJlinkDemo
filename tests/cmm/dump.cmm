@@ -1,0 +1,31 @@
+; dump: seed a region, then print a canonical hex+ascii dump of it.
+; Target workflow: dump a block of target memory to the log for inspection.
+SYStem.CPU CortexM4
+SYStem.Up
+&base=0x20000200
+; seed 32 bytes with printable ASCII: value = 'A' + (i mod 26).
+; NB: loop bounds are decimal (32. not 32) -- bare 32 would be hex 0x32.
+&i=0
+WHILE &i<32.
+(
+  Data.Set SD:&base+&i %Byte 0x41+(&i%26.)
+  &i=&i+1
+)
+; 16 bytes per line: address, hex pairs, ascii
+&row=0
+WHILE &row<32.
+(
+  &line=FORMAT.HEX(8,&base+&row)+": "
+  &asc=""
+  &c=0
+  WHILE &c<16.
+  (
+    &b=Data.Byte(SD:&base+&row+&c)
+    &line="&line"+FORMAT.HEX(2,&b)+" "
+    &asc="&asc"+CONVert.CHAR(&b)
+    &c=&c+1
+  )
+  PRINT "&line|&asc|"
+  &row=&row+16.
+)
+ENDDO

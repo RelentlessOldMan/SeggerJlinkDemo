@@ -18,6 +18,20 @@ TRACE32, PRACTICE and PowerView are trademarks of Lauterbach GmbH. This is an in
 
 The interpreter's behaviour is checked against the real thing: the scripts in `tests/cmm/` were run in the free TRACE32 instruction-set simulator, and their recorded output (`*.expected`) must match cmmrun's line for line.
 
+### Example scripts
+
+`tests/cmm/` holds small scripts for the routine debugger workflows, each one runnable with `cmmrun run <script> --backend mock` (or `--backend jlink` on real hardware):
+
+| Script | Shows | Checked against |
+|---|---|---|
+| `peek.cmm` | read memory (long/word/byte) and registers, formatted | TRACE32 simulator |
+| `poke.cmm` | write memory and registers, then read back to verify | TRACE32 simulator |
+| `dump.cmm` | hex + ASCII dump of a memory region to the log | TRACE32 simulator |
+| `loadsave.cmm` | save a region to a host file, reload it elsewhere, verify | TRACE32 simulator |
+| `run.cmm` | reset to the vector table, run to an address, read result | mock backend (the free simulator cannot execute) |
+
+Note the PRACTICE gotcha these lean on: numbers are **hex by default**, so a loop bound like `16` means `0x16` (22). Write `16.` for decimal. See [docs/practice-semantics.md](docs/practice-semantics.md).
+
 See [PLAN.md](PLAN.md) for the design and [docs/practice-semantics.md](docs/practice-semantics.md) for the language notes.
 
 ## Install
