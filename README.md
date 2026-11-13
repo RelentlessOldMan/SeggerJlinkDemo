@@ -115,6 +115,8 @@ For every entry script (a file no other file calls), the worst verdict in its ca
 
 It also ranks blockers: "this command appears in N blocked scripts and is the only blocker in M of them" (adding it moves those M out of BLOCKED, though some may then be DYNAMIC).
 
+**Running this on your own scripts** is the best way to decide what to add next — the report is anonymized (shapes and counts only, with a leak guard), so it is safe to share even when the scripts are not. See [docs/evaluate-scripts.md](docs/evaluate-scripts.md) for the exact commands, the privacy rules, and a copy-paste prompt for driving it with an AI coding agent.
+
 ## The J-Link backend and its safety rules
 
 Needs `pip install -e .[jlink]` and the J-Link Software Pack from SEGGER. Copy [examples/target.example.yaml](examples/target.example.yaml) to `target.yaml` (gitignored), fill in the probe serial from `cmmrun probes`, then:
