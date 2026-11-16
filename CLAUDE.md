@@ -77,7 +77,8 @@ what is in git should be able to carry on the work. So:
     cmmrun run <script> --backend mock|jlink           # run a script (jlink needs --target target.yaml)
 
 Versioning follows the RelentlessOldMan date scheme (`YYYY.M.D.N`), single source of truth
-`cmmrun/__init__.py`. (Still on semver `0.2.0`; convert on the next build — see status Next.)
+`cmmrun/__init__.py` (`pyproject.toml` reads it dynamically). Bump `N` for each build the same
+day; a new day starts at `.0`. Never type the version anywhere else by hand.
 
 ## Where things are
 

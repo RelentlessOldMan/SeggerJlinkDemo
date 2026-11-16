@@ -4,7 +4,7 @@
 
 TRACE32, PRACTICE and PowerView are trademarks of Lauterbach GmbH. This is an independent project, not affiliated with Lauterbach or SEGGER.
 
-## Status (v0.2.0)
+## Status
 
 | Command | State |
 |---|---|

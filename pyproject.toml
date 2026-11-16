@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cmmrun"
-version = "0.2.0"
+dynamic = ["version"]        # single source of truth: cmmrun/__init__.py (date scheme YYYY.M.D.N)
 description = "Run a subset of PRACTICE (.cmm) scripts against non-Lauterbach debug probes, and analyse script corpora"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -20,6 +20,9 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 cmmrun = "cmmrun.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "cmmrun.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["cmmrun*"]

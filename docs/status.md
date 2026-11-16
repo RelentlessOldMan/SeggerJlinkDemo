@@ -9,9 +9,7 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
    [docs/evaluate-scripts.md](evaluate-scripts.md), bring back the anonymized `cmmrun-check.md`,
    and implement the top-ranked unsupported commands/functions (each validated against the
    simulator). Waiting on: the report from a machine that has such a collection.
-2. **Convert the version to the date scheme** (`YYYY.M.D.N`) per RelentlessOldMan VERSIONING;
-   it is still semver `0.2.0` in `cmmrun/__init__.py`. Do it on the next build/release.
-3. **Hardware bring-up.** Run the example scripts on a real MCU through the J-Link backend
+2. **Hardware bring-up.** Run the example scripts on a real MCU through the J-Link backend
    (`--backend jlink --target target.yaml`). Waiting on: an MCU board on the designated probe.
    (Probe serial and board details stay in machine memory, not here.)
 
@@ -35,6 +33,9 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
   backend). `docs/evaluate-scripts.md` documents the anonymized evaluation workflow and a
   copy-paste agent prompt. 123 tests pass.
 - **Project brain** (2026-11-16): `CLAUDE.md`, this file, and `tools/name_check.py`.
+- **Date-based versioning** (2026-11-16): switched from semver `0.2.0` to `YYYY.M.D.N`
+  (`2026.11.16.0`); `pyproject.toml` now reads the version dynamically from
+  `cmmrun/__init__.py`, the single source of truth.
 
 ## Not built
 
