@@ -1,0 +1,21 @@
+; sYmbol.CREATE.Label / Done / RESet and sYmbol.EXIST()
+sYmbol.RESet
+PRINT "e0=" sYmbol.EXIST(mylab)
+sYmbol.CREATE.Label mylab 0x1000
+PRINT "e1=" sYmbol.EXIST(mylab)
+sYmbol.CREATE.Done
+PRINT "e2=" sYmbol.EXIST(mylab) " " sYmbol.EXIST(nosuch)
+PRINT "value=" mylab
+PRINT "offset=" ADDRESS.OFFSET(mylab)
+PRINT "plus=" mylab+0x10
+PRINT "cmp=" mylab==C:0x1000
+y.create.l other 0x2000+0x4
+y.create.l dlab D:0x3000
+y.create.done
+PRINT "o=" sYmbol.EXIST(other) " " ADDRESS.OFFSET(other) " " dlab
+PRINT "case=" sYmbol.EXIST(MYLAB)
+IF sYmbol.EXIST(other)
+  PRINT "if ok"
+sYmbol.RESet
+PRINT "reset=" sYmbol.EXIST(mylab)
+ENDDO

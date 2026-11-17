@@ -17,7 +17,8 @@ from fractions import Fraction
 from typing import TYPE_CHECKING, Callable
 
 from .expr import Evaluator, sub_eval
-from .values import (Addr, Bool, Flt, Num, PracticeError, Str, Value, plain, to_int, to_str)
+from .values import (Addr, Bool, Flt, Num, PracticeError, Str, UnsupportedError, Value, plain, to_int,
+                     to_str)
 
 if TYPE_CHECKING:
     from .interpreter import Interpreter
@@ -226,6 +227,31 @@ def _f2i(it, a, ev):
 @fn("OS.PresentPracticeDirectory")
 def _ppd(it, a, ev):
     return Str(str(it.script_dir()))
+
+
+@fn("ADDRESS.OFFSET")
+def _addr_offset(it, a, ev):
+    v = sub_eval(ev, a[0])
+    return Num(v.v if isinstance(v, Addr) else to_int(v, "address"), "hex")
+
+
+@fn("sYmbol.EXIST")
+def _symexist(it, a, ev):
+    # takes a symbol name, not an expression; only symbols the script made with sYmbol.CREATE
+    name = a[0].strip() if a else ""
+    if name in it.symbols:
+        return Bool(True)
+    if it.elf_loaded:
+        # TRACE32 would also know the ELF's debug symbols; cmmrun does not read them, and a
+        # wrong FALSE would silently change what the script does
+        raise UnsupportedError(f"sYmbol.EXIST({name}): debug symbols from a loaded ELF are not supported")
+    return Bool(False)
+
+
+@fn("OS.PresentPracticeFile")
+def _ppf(it, a, ev):
+    # the absolute path of the script being run (also inside its GOSUB subroutines)
+    return Str(str(it.frame.prog.path.resolve())) if it.frame else Str("")
 
 
 @fn("OS.PresentWorkingDirectory")

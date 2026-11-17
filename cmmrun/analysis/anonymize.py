@@ -30,6 +30,10 @@ ID_RE = re.compile(r"^(u[0-9a-f]{%d}|F\d{4,}|m\d+)$" % ID_LEN)
 NON_ASCII_RE = re.compile(r"[^\x20-\x7e\t\n]+")
 MIN_SALT = 16
 WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# A dotted name: the first segment starts with a letter, later ones may start with a digit
+# (public names such as `LOGGER.Mode.64bit` or `SOFTWARE.64BIT`).
+DOTTED_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*")
+SEG_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
 class SaltError(Exception):
@@ -255,7 +259,7 @@ def guard(data, vocab: Vocab, allowed_terms: set[str]) -> tuple[object, int]:
         def rep(m):
             nonlocal count
             w = m.group(0)
-            if ok_word(w):
+            if w.isdigit() or ok_word(w):     # bare numbers were never redacted elsewhere either
                 return w
             count += 1
             return "[redacted]"
@@ -267,7 +271,7 @@ def guard(data, vocab: Vocab, allowed_terms: set[str]) -> tuple[object, int]:
                 return name if ok_word(name) else rep(m)
             if known_name(name):
                 return name
-            return WORD_RE.sub(rep, name)
+            return SEG_RE.sub(rep, name)
 
         def rep_other(m):
             nonlocal count
@@ -275,7 +279,7 @@ def guard(data, vocab: Vocab, allowed_terms: set[str]) -> tuple[object, int]:
             return "[redacted]"
 
         s = NON_ASCII_RE.sub(rep_other, s)
-        return re.sub(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", rep_dotted, s)
+        return DOTTED_RE.sub(rep_dotted, s)
 
     def walk(x):
         if isinstance(x, dict):

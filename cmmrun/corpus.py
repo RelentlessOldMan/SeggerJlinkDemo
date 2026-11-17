@@ -52,6 +52,10 @@ class Corpus:
     vocab: Vocab
     by_basename: dict[str, list[str]] = field(default_factory=dict)
     duplicates: int = 0          # files whose bytes equal an earlier file (parsed once, shared)
+    max_bytes: int = 0           # the size limit in effect; larger files were skipped
+    too_large_bytes: int = 0     # total size of the skipped too-large files
+    too_large_rels: set[str] = field(default_factory=set)    # lower-case rel paths of those files
+    too_large_names: set[str] = field(default_factory=set)   # and their lower-case base names
 
     def callers(self) -> dict[str, set[str]]:
         out: dict[str, set[str]] = {k: set() for k in self.files}
@@ -92,8 +96,10 @@ def _excluded(rel: str, name: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(low, p) or fnmatch.fnmatchcase(nlow, p) for p in patterns)
 
 
-def _list_dir(path: str, rel: str, exts: tuple[str, ...], excludes: tuple[str, ...]):
-    """List one directory. Returns (files [(path, rel, size)], subdirs [(path, rel)], counts)."""
+def _list_dir(path: str, rel: str, exts: tuple[str, ...], excludes: tuple[str, ...], max_bytes: int,
+              big: list | None = None):
+    """List one directory. Returns (files [(path, rel, size)], subdirs [(path, rel)], counts).
+    Files over max_bytes are counted, and listed as (rel, size) in `big` if given."""
     files, subdirs = [], []
     counts = {"too_large": 0, "links": 0, "excluded": 0, "unreadable": 0}
     with os.scandir(path) as it:
@@ -117,8 +123,10 @@ def _list_dir(path: str, rel: str, exts: tuple[str, ...], excludes: tuple[str, .
                         continue
                     # On Windows the size comes from the directory listing: no extra round trip.
                     size = e.stat(follow_symlinks=False).st_size
-                    if size > MAX_BYTES:
+                    if size > max_bytes:
                         counts["too_large"] += 1
+                        if big is not None:
+                            big.append((erel, size))     # list.append is atomic: safe across threads
                         continue
                     files.append((e.path, erel, size))
             except OSError:
@@ -127,17 +135,20 @@ def _list_dir(path: str, rel: str, exts: tuple[str, ...], excludes: tuple[str, .
 
 
 def discover(root: pathlib.Path, exts: tuple[str, ...], excludes: tuple[str, ...] = (),
-             jobs: int = 16, progress: "Progress | None" = None):
+             jobs: int = 16, progress: "Progress | None" = None, max_bytes: int | None = None,
+             big: list | None = None):
     """Find script files under root. Directories are listed in parallel, because on a
-    network share every listing is a round trip. Returns ([(path, rel, size)], skipped)."""
+    network share every listing is a round trip. Returns ([(path, rel, size)], skipped).
+    Files over max_bytes (default MAX_BYTES) are skipped and, if `big` is given, listed there."""
     progress = progress or Progress(False)
+    max_bytes = MAX_BYTES if max_bytes is None else max_bytes
     skipped = {"too_large": 0, "unreadable": 0, "unreadable_dirs": 0, "links": 0, "excluded": 0}
     found: list = []
     ndirs = 0
     done_q: queue.SimpleQueue = queue.SimpleQueue()
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
         def submit(path, rel):
-            ex.submit(_list_dir, path, rel, exts, excludes).add_done_callback(done_q.put)
+            ex.submit(_list_dir, path, rel, exts, excludes, max_bytes, big).add_done_callback(done_q.put)
         submit(str(root), "")
         outstanding = 1
         while outstanding:
@@ -157,13 +168,47 @@ def discover(root: pathlib.Path, exts: tuple[str, ...], excludes: tuple[str, ...
                 outstanding += 1
             progress(f"listing: {ndirs} directories, {len(found)} scripts found")
     found.sort(key=lambda f: f[1])
+    if big is not None:
+        big.sort()
     progress(f"listing done: {ndirs} directories, {len(found)} scripts", force=True)
     return found, skipped
 
 
-def _read(path: str) -> bytes:
+def size_text(n: int) -> str:
+    """A byte count for people: 512 B, 12.3 KiB, 2.0 MiB, 1,234 MiB, 10.9 GiB."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 2**20:
+        return f"{n / 1024:.1f} KiB"
+    if n < 2**30:
+        return f"{n / 2**20:,.1f} MiB" if n < 100 * 2**20 else f"{n / 2**20:,.0f} MiB"
+    return f"{n / 2**30:,.1f} GiB"
+
+
+def warn_too_large(big: list, max_bytes: int, file=None):
+    """Say loudly on stderr that files were skipped for size, per top-level directory (real
+    names: stderr is local output, never part of a report)."""
+    if not big:
+        return
+    file = file or sys.stderr
+    by_top: dict[str, list[int]] = {}
+    for rel, size in big:
+        row = by_top.setdefault(rel.split("/", 1)[0] if "/" in rel else ".", [0, 0, 0])
+        row[0] += 1
+        row[1] += size
+        row[2] = max(row[2], size)
+    largest = max(s for _, s in big)
+    print(f"cmmrun: WARNING: skipped {len(big)} script(s) over the {size_text(max_bytes)} size limit "
+          f"(largest {size_text(largest)}). They are NOT in the results. "
+          f"Raise the limit with --max-file-size MIB (memory use is roughly "
+          f"{EST_MEM_MIB_PER_MIB} MiB per MiB of script).", file=file)
+    for d, (n, b, mx) in sorted(by_top.items(), key=lambda kv: -kv[1][1])[:10]:
+        print(f"cmmrun:   {d}: {n} file(s), {size_text(b)}, largest {size_text(mx)}", file=file)
+
+
+def _read(path: str, max_bytes: int) -> bytes:
     with open(path, "rb") as fh:
-        return fh.read(MAX_BYTES + 1)     # bounded even if the file grew after it was listed
+        return fh.read(max_bytes + 1)     # bounded even if the file grew after it was listed
 
 
 def _long_root(root: pathlib.Path) -> pathlib.Path:
@@ -181,12 +226,18 @@ def _long_root(root: pathlib.Path) -> pathlib.Path:
 
 
 def load_corpus(root: str | os.PathLike, exts=(".cmm",), vocab: Vocab | None = None,
-                excludes: tuple[str, ...] = (), jobs: int = 16, progress: bool = False) -> Corpus:
+                excludes: tuple[str, ...] = (), jobs: int = 16, progress: bool = False,
+                max_bytes: int | None = None, warn: bool = True) -> Corpus:
     root = _long_root(pathlib.Path(root).resolve())
     v = vocab or load()
     prog = Progress(progress)
+    max_bytes = MAX_BYTES if max_bytes is None else max_bytes
+    big: list = []
     found, skipped = discover(root, tuple(e.lower() for e in exts),
-                              tuple(x.lower().replace("\\", "/") for x in excludes), jobs, prog)
+                              tuple(x.lower().replace("\\", "/") for x in excludes), jobs, prog,
+                              max_bytes, big)
+    if warn:
+        warn_too_large(big, max_bytes)
     files: dict[str, FileInfo] = {}
     parsed: dict[bytes, tuple] = {}
     duplicates = 0
@@ -197,13 +248,13 @@ def load_corpus(root: str | os.PathLike, exts=(".cmm",), vocab: Vocab | None = N
         queue: deque = deque()
         it = iter(found)
         for item in itertools.islice(it, window):
-            queue.append((item, ex.submit(_read, item[0])))
+            queue.append((item, ex.submit(_read, item[0], max_bytes)))
         n = 0
         while queue:
             (path, rel, size), fut = queue.popleft()
             nxt = next(it, None)
             if nxt is not None:
-                queue.append((nxt, ex.submit(_read, nxt[0])))
+                queue.append((nxt, ex.submit(_read, nxt[0], max_bytes)))
             n += 1
             prog(f"reading: {n}/{len(found)} scripts")
             try:
@@ -211,7 +262,7 @@ def load_corpus(root: str | os.PathLike, exts=(".cmm",), vocab: Vocab | None = N
             except OSError:
                 skipped["unreadable"] += 1
                 continue
-            if len(data) > MAX_BYTES:
+            if len(data) > max_bytes:
                 skipped["too_large"] += 1
                 continue
             # Big trees hold many copies of the same script (branches, releases, archives):
@@ -229,6 +280,10 @@ def load_corpus(root: str | os.PathLike, exts=(".cmm",), vocab: Vocab | None = N
             pf, endings, err = hit
             files[rel] = FileInfo(rel, len(data), endings, pf, error=err)
     c = Corpus(root, files, skipped, v, duplicates=duplicates)
+    c.max_bytes = max_bytes
+    c.too_large_bytes = sum(s for _, s in big)
+    c.too_large_rels = {r.lower() for r, _ in big}
+    c.too_large_names = {r.rsplit("/", 1)[-1].lower() for r, _ in big}
     for rel in files:
         c.by_basename.setdefault(rel.rsplit("/", 1)[-1].lower(), []).append(rel)
     lower_index = {rel.lower(): rel for rel in files}
@@ -246,35 +301,48 @@ EST_MEM_KIB_PER_FILE = 4        # every file, even a copy: its entry, call edges
 EST_SECONDS_PER_FILE = 0.00025  # on a local disk; a network share adds its latency (hidden by --jobs)
 
 
-def _hash_file(path: str) -> tuple[bytes, int]:
+def _hash_file(path: str, max_bytes: int) -> tuple[bytes, int]:
     with open(path, "rb") as fh:
-        data = fh.read(MAX_BYTES + 1)
+        data = fh.read(max_bytes + 1)
     return hashlib.blake2b(data, digest_size=16).digest(), len(data)
 
 
+def _top(rel: str) -> str:
+    return rel.split("/", 1)[0] if "/" in rel else "."
+
+
 def inventory(root: str | os.PathLike, exts=(".cmm",), excludes: tuple[str, ...] = (), jobs: int = 16,
-              progress: bool = False, top: int = 15) -> dict:
+              progress: bool = False, top: int = 15, max_bytes: int | None = None) -> dict:
     """Cheap first look at a big tree: list and hash the scripts without parsing them.
-    Tells how much distinct script text there is, and estimates what a full scan costs."""
+    Tells how much distinct script text there is, and estimates what a full scan costs.
+    Files over the size limit are not hashed, but they are counted per directory, so a
+    directory of nothing but huge files still shows up."""
     root = _long_root(pathlib.Path(root).resolve())
     prog = Progress(progress)
+    max_bytes = MAX_BYTES if max_bytes is None else max_bytes
+    big: list = []
     found, skipped = discover(root, tuple(e.lower() for e in exts),
-                              tuple(x.lower().replace("\\", "/") for x in excludes), jobs, prog)
+                              tuple(x.lower().replace("\\", "/") for x in excludes), jobs, prog,
+                              max_bytes, big)
     seen: set[bytes] = set()
     total = distinct = ndistinct = 0
-    by_top: dict[str, list[int]] = {}     # top-level dir -> [files, bytes, distinct bytes]
+    by_top: dict[str, list[int]] = {}     # top-level dir -> [files, bytes, distinct bytes, big files, big bytes]
+    for rel, size in big:
+        row = by_top.setdefault(_top(rel), [0, 0, 0, 0, 0])
+        row[3] += 1
+        row[4] += size
     def hashed(ex):
         # a bounded window of jobs, like load_corpus, so memory doesn't grow with the file count
         window = max(4, 4 * jobs)
         queue: deque = deque()
         it = iter(found)
         for item in itertools.islice(it, window):
-            queue.append((item, ex.submit(_safe_hash, item[0])))
+            queue.append((item, ex.submit(_safe_hash, item[0], max_bytes)))
         while queue:
             item, fut = queue.popleft()
             nxt = next(it, None)
             if nxt is not None:
-                queue.append((nxt, ex.submit(_safe_hash, nxt[0])))
+                queue.append((nxt, ex.submit(_safe_hash, nxt[0], max_bytes)))
             yield item, fut.result()
 
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
@@ -284,11 +352,14 @@ def inventory(root: str | os.PathLike, exts=(".cmm",), excludes: tuple[str, ...]
                 skipped["unreadable"] += 1
                 continue
             key, nbytes = res
-            if nbytes > MAX_BYTES:
+            if nbytes > max_bytes:
                 skipped["too_large"] += 1
+                big.append((rel, nbytes))
+                row = by_top.setdefault(_top(rel), [0, 0, 0, 0, 0])
+                row[3] += 1
+                row[4] += nbytes
                 continue
-            top_dir = rel.split("/", 1)[0] if "/" in rel else "."
-            row = by_top.setdefault(top_dir, [0, 0, 0])
+            row = by_top.setdefault(_top(rel), [0, 0, 0, 0, 0])
             row[0] += 1
             row[1] += nbytes
             total += nbytes
@@ -298,20 +369,27 @@ def inventory(root: str | os.PathLike, exts=(".cmm",), excludes: tuple[str, ...]
                 distinct += nbytes
                 row[2] += nbytes
     mib = distinct / 2**20
-    biggest = sorted(by_top.items(), key=lambda kv: -kv[1][2])[:top]
+    # rank by distinct content, but a directory of only too-large files still counts by its size
+    biggest = sorted(by_top.items(), key=lambda kv: -(kv[1][2] + kv[1][4]))[:top]
+    big_largest = max((s for _, s in big), default=0)
     return {
         "files": sum(r[0] for r in by_top.values()), "bytes": total,
         "distinct_files": ndistinct, "distinct_bytes": distinct,
         "skipped": skipped,
+        "max_file_bytes": max_bytes,
+        "too_large": {"files": len(big), "bytes": sum(s for _, s in big), "largest_bytes": big_largest,
+                      # memory to scan the largest one alone, if the limit were raised
+                      "largest_memory_mib": round(30 + EST_MEM_MIB_PER_MIB * big_largest / 2**20)},
         "estimate": {"memory_mib": round(30 + EST_MEM_MIB_PER_MIB * mib + EST_MEM_KIB_PER_FILE * len(found) / 1024),
                      "minutes": round((EST_SECONDS_PER_MIB * mib + EST_SECONDS_PER_FILE * len(found)) / 60, 1)},
-        "top_dirs": [{"dir": d, "files": f, "bytes": b, "distinct_bytes": u} for d, (f, b, u) in biggest],
+        "top_dirs": [{"dir": d, "files": f, "bytes": b, "distinct_bytes": u, "too_large_files": bf,
+                      "too_large_bytes": bb} for d, (f, b, u, bf, bb) in biggest],
     }
 
 
-def _safe_hash(path: str):
+def _safe_hash(path: str, max_bytes: int):
     try:
-        return _hash_file(path)
+        return _hash_file(path, max_bytes)
     except OSError:
         return None
 
@@ -343,7 +421,11 @@ def resolve_path(c: Corpus, caller_rel: str, text: str, lower_index: dict[str, s
         norm = os.path.normpath(cand.as_posix()).replace("\\", "/")
         if norm.lower() in lower_index:
             return "found", lower_index[norm.lower()]
+        if norm.lower() in c.too_large_rels:
+            return "too_large", ""
     named = c.by_basename.get(pathlib.PurePosixPath(t).name.lower(), [])
+    if not named and pathlib.PurePosixPath(t).name.lower() in c.too_large_names:
+        return "too_large", ""
     if len(named) == 1:
         return "found_by_name", named[0]
     if len(named) > 1:

@@ -115,3 +115,26 @@ def test_salt_file_rules(tmp_path):
         with pytest.raises(SaltError):
             load_salt(str(f))
         assert f.read_text() == bad          # never overwritten
+
+
+def test_max_file_size_is_reported_and_raisable(tmp_path, capsys):
+    from cmmrun.analysis.anonymize import Anonymizer
+    from cmmrun.analysis.check import check
+    _tree(tmp_path)
+    (tmp_path / "one" / "a.cmm").write_bytes(b'PRINT "a"\nDO regs.cmm\nENDDO\n')
+    (tmp_path / "one" / "regs.cmm").write_bytes(b"; generated\n" + b"PRINT 1\n" * 200)
+    c = load_corpus(tmp_path, max_bytes=1000)
+    assert "one/regs.cmm" not in c.files and c.too_large_bytes > 1000
+    assert "over the" in capsys.readouterr().err.lower()       # said loudly, not skipped silently
+    res = check(c, Anonymizer(c.vocab, b"k" * 16, enabled=False))
+    caller = next(r for r in res["per_entry_script"] if "too_large_script" in r["reasons"])
+    assert caller["verdict"] == "BROKEN"
+    assert "one/regs.cmm" in load_corpus(tmp_path, max_bytes=10_000).files
+
+
+def test_inventory_lists_files_over_the_limit(tmp_path, capsys):
+    _tree(tmp_path)
+    (tmp_path / "two" / "regs.cmm").write_bytes(b"PRINT 1\n" * 200)
+    assert main(["inventory", str(tmp_path), "--max-file-size", "0.001"]) == 0
+    out = capsys.readouterr().out
+    assert "OVER THE LIMIT" in out and "over the limit" in out.split("OVER THE LIMIT", 1)[1]

@@ -149,3 +149,21 @@ def test_run_control(tmp_path):
     ]
     ops = [e.op for e in it.backend.events]
     assert ops.index("reset") < ops.index("go")      # reset before run
+
+
+def test_preflight_allows_symbols_the_script_creates(tmp_path, capsys):
+    code, err = _run_cli(tmp_path, "sYmbol.CREATE.Label buf 0x2000\nsYmbol.CREATE.Done\n"
+                                   "PRINT buf+4 \" \" ADDRESS.OFFSET(buf)\nENDDO\n", capsys)
+    assert code == 0, err
+    code, err = _run_cli(tmp_path, "sYmbol.CREATE.Label buf 0x2000\nsYmbol.CREATE.Done\n"
+                                   "PRINT other\nENDDO\n", capsys)
+    assert code == 5 and "other" in err
+
+
+def test_symbol_exist_after_elf_load_is_unsupported(tmp_path):
+    it = Interpreter(MockBackend())
+    it.elf_loaded = True                # TRACE32 would know the ELF's symbols; cmmrun does not
+    s = tmp_path / "m.cmm"
+    s.write_text("PRINT sYmbol.EXIST(main)\nENDDO\n")
+    with pytest.raises(ScriptFailure, match="debug symbols"):
+        it.run(s)

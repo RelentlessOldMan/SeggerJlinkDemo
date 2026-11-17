@@ -294,6 +294,8 @@ def scan(c: Corpus, anon: Anonymizer, max_examples: int = 3) -> dict:
             "files": nfiles,
             "duplicates": c.duplicates,
             "skipped": dict(c.skipped),
+            "max_file_mib": round(c.max_bytes / 2**20, 1),
+            "too_large_mib": round(c.too_large_bytes / 2**20, 1),
             "totals": dict(tot),
             "lines_per_file": dict(sorted(sizes.items(), key=lambda kv: _sort_bucket(kv[0]))),
             "encodings": dict(enc),

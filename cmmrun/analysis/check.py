@@ -207,6 +207,8 @@ def check(c: Corpus, anon: Anonymizer, backend: str = "jlink", hints: str | None
                 res.broken.add("missing_script")
             elif e.status == "t32_system":
                 res.broken.add("t32_system_script")
+            elif e.status == "too_large":
+                res.broken.add("too_large_script")
         env = envs.get(rel, {})
         for st in walk(f.pf.stmts):
             judge_stmt(st, rel, res)
@@ -232,6 +234,8 @@ def check(c: Corpus, anon: Anonymizer, backend: str = "jlink", hints: str | None
                         res.broken.add("missing_script")
                     elif status == "t32_system":
                         res.broken.add("t32_system_script")
+                    elif status == "too_large":
+                        res.broken.add("too_large_script")
                 if "jump_target" in serious:
                     jt = jump_target(s2)
                     if jt not in f.pf.labels and jt not in f.pf.subroutines:
@@ -291,6 +295,9 @@ def check(c: Corpus, anon: Anonymizer, backend: str = "jlink", hints: str | None
         "tool_version": __version__,
         "anonymized": anon.enabled,
         "backend": backend,
+        "skipped": dict(c.skipped),
+        "max_file_mib": round(c.max_bytes / 2**20, 1),
+        "too_large_mib": round(c.too_large_bytes / 2**20, 1),
         "verdicts": {
             "entry_only": {k: verdict_entry.get(k, 0) for k in ORDER},
             "all_files": {k: verdict_all.get(k, 0) for k in ORDER},

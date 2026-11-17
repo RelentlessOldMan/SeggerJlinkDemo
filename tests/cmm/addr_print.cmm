@@ -1,0 +1,15 @@
+PRINT "lit=" C:0x1000
+PRINT "d=" D:0x3000+4
+&a=C:0x1000
+PRINT "m=&a"
+PRINT "fmt=" %Hex C:0x1000
+y.create.l s1 0x1000
+y.create.done
+&b=s1
+PRINT "mb=&b"
+PRINT "sp=" s1 " " C:0x20
+PRINT "r=" C:0x1000--0x10FF
+PRINT "r2=" 0x1000++0xF
+&r=D:0x20--0x2F
+PRINT "mr=&r"
+PRINT "na=" 0x1000--0x10FF

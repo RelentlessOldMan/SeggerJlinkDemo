@@ -105,3 +105,27 @@ def test_substitute_is_one_pass():
     assert substitute("&a &b", env, 8) == {"&b X"}
     assert substitute("&b &a", env, 8) == {"X &b"}
     assert substitute("&(a)x", {"a": {"1"}}, 8) == {"1x"}
+
+
+def test_fast_paths_match_the_full_scanners():
+    import random
+    r = random.Random(7)
+    alphabet = ["a", "B", "0", " ", "\t", ";", "/", "//", "&x", ".", "\"", "'", "(", ")", "[", "]", "{", "}",
+                "\"\"", "';'", "~~/", ","]
+    for _ in range(20000):
+        s = "".join(r.choice(alphabet) for _ in range(r.randint(0, 14)))
+        assert lexer.strip_comment(s) == _slow(lexer.strip_comment, s, "_QUOTES_RE")
+        assert lexer.split_args(s) == _slow(lexer.split_args, s, "_GROUPING_RE", "_BRACKETS_RE")
+
+
+def _slow(fn, s, *guards):
+    """Call `fn` with its fast paths disabled."""
+    import re
+    saved = {g: getattr(lexer, g) for g in guards}
+    for g in guards:
+        setattr(lexer, g, re.compile(r"(?s).?"))     # always "found": take the full path
+    try:
+        return fn(s)
+    finally:
+        for g, v in saved.items():
+            setattr(lexer, g, v)

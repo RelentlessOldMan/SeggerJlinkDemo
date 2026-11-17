@@ -18,13 +18,16 @@ follows TRACE32 (checked in the simulator, see docs/practice-semantics.md):
 from __future__ import annotations
 
 import pathlib
+import re
 import time
+from array import array
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 from ..backends.base import Backend
 from ..backends.images import load_image
 from ..lang import lexer
-from ..lang.parser import Stmt, parse_bytes, parse_statement
+from ..lang.parser import Stmt, parse_bytes, parse_line, parse_statement
 from ..lang.vocab import Vocab, abbrev_ok, load
 from . import functions
 from .expr import Evaluator, tokenize
@@ -66,18 +69,27 @@ class ScriptFailure(Exception):
 
 
 # ---------------------------------------------------------------- program
+# Scripts larger than this are kept as text plus a compact index and parsed again line by
+# line when run (see LazyIns); smaller ones are parsed once into Stmt objects.
+LAZY_BYTES = 2 * 2**20
+
+
 class Program:
     def __init__(self, path: pathlib.Path, vocab: Vocab):
         self.path = path
-        pf = parse_bytes(path.read_bytes(), vocab)
+        self.vocab = vocab
+        data = path.read_bytes()
+        if len(data) > LAZY_BYTES:
+            self._init_lazy(data)
+            return
+        pf = parse_bytes(data, vocab)
         if "unbalanced_close" in pf.issues or "unclosed_block" in pf.issues:
             raise PracticeError(f"{path.name}: unbalanced ( ) blocks")
         if "nesting_too_deep" in pf.issues:
             raise PracticeError(f"{path.name}: too many statements chained on one line")
-        self.vocab = vocab
         self.ins: list[Stmt] = []
         for st in pf.stmts:
-            self._flatten(st)
+            _flatten(st, self.ins)
         self.match: dict[int, int] = {}
         stack = []
         for i, st in enumerate(self.ins):
@@ -89,22 +101,47 @@ class Program:
         self.subs = {st.args[0]: i for i, st in enumerate(self.ins)
                      if st.kind == "command" and st.canon == "SUBROUTINE" and st.args}
 
-    def _flatten(self, st: Stmt):
-        if st.kind in ("block_open", "block_close"):
-            inner, st.inline = st.inline, None
-            self.ins.append(st)
-            if inner:
-                self._flatten(inner)
-            return
-        if st.inline is not None:
-            # IF c <stmt>: the inline statement is the body; flatten its own blocks too.
-            inner = st.inline
-            if inner.kind in ("block_open", "block_close"):
-                st.inline = None
-                self.ins.append(st)
-                self._flatten(inner)
-                return
-        self.ins.append(st)
+    def _init_lazy(self, data: bytes):
+        """One streaming pass: build the index (where each instruction's line starts, block
+        matches, labels, subroutines) without keeping any statement."""
+        d = lexer.decode(data)
+        text = lexer.normalize_eols(d.text)
+        del data, d
+        line_start, line_no = array("q"), array("q")     # per logical line that has instructions
+        ins_line, ins_k = array("l"), array("H")         # per instruction: its line, index in that line
+        match = array("l")                               # per instruction: matching close, or -1
+        stack: list[int] = []
+        self.labels, self.subs = {}, {}
+        for start, raw, lineno, _ in lexer.iter_logical(text):
+            if not raw.strip():
+                continue
+            flat = _line_ins(raw, lineno, self.vocab)
+            if not flat:
+                continue
+            li = len(line_start)
+            line_start.append(start)
+            line_no.append(lineno)
+            for k, st in enumerate(flat):
+                i = len(ins_line)
+                ins_line.append(li)
+                ins_k.append(k)
+                match.append(-1)
+                if st.kind == "too_deep":
+                    raise PracticeError(f"{self.path.name}: too many statements chained on one line")
+                if st.kind == "block_open":
+                    stack.append(i)
+                elif st.kind == "block_close":
+                    if not stack:
+                        raise PracticeError(f"{self.path.name}: unbalanced ( ) blocks")
+                    match[stack.pop()] = i
+                elif st.kind == "label":
+                    self.labels[st.name] = i
+                elif st.kind == "command" and st.canon == "SUBROUTINE" and st.args:
+                    self.subs[st.args[0]] = i
+        if stack:
+            raise PracticeError(f"{self.path.name}: unbalanced ( ) blocks")
+        self.match = match
+        self.ins = LazyIns(text, line_start, line_no, ins_line, ins_k, self.vocab)
 
     def unit_end(self, i: int) -> int:
         """Index just after the unit (statement with its body) starting at i."""
@@ -140,6 +177,71 @@ class Program:
         if c == "SUBROUTINE":
             return self.unit_end(i + 1)
         return i + 1
+
+
+def _flatten(st: Stmt, out: list):
+    """Append `st` and its inline chain to `out` as separate instructions where blocks need it."""
+    if st.kind in ("block_open", "block_close"):
+        inner, st.inline = st.inline, None
+        out.append(st)
+        if inner:
+            _flatten(inner, out)
+        return
+    if st.inline is not None:
+        # IF c <stmt>: the inline statement is the body; flatten its own blocks too.
+        inner = st.inline
+        if inner.kind in ("block_open", "block_close"):
+            st.inline = None
+            out.append(st)
+            _flatten(inner, out)
+            return
+    out.append(st)
+
+
+def _line_ins(raw: str, lineno: int, vocab: Vocab) -> list[Stmt]:
+    """The instructions of one logical line, as the eager parse + flatten would give them."""
+    label, st, _, _, _ = parse_line(raw, lineno, vocab)
+    out: list[Stmt] = []
+    if label is not None:
+        out.append(Stmt("label", lineno, name=label))
+    if st is not None:
+        _flatten(st, out)
+    return out
+
+
+class LazyIns:
+    """The instruction list of a big script, parsed on demand from its text.
+
+    Memory is the text plus about 30 bytes per instruction, instead of several hundred bytes
+    per parsed statement. Recently used lines stay parsed, so loops do not parse again."""
+    CACHE_LINES = 8192
+
+    def __init__(self, text, line_start, line_no, ins_line, ins_k, vocab):
+        self.text, self.line_start, self.line_no = text, line_start, line_no
+        self.ins_line, self.ins_k, self.vocab = ins_line, ins_k, vocab
+        self.cache: OrderedDict[int, list[Stmt]] = OrderedDict()
+
+    def __len__(self):
+        return len(self.ins_line)
+
+    def __getitem__(self, i: int) -> Stmt:
+        if i < 0:
+            i += len(self.ins_line)
+        li = self.ins_line[i]
+        flat = self.cache.get(li)
+        if flat is None:
+            _, raw, lineno, _ = next(lexer.iter_logical(self.text, self.line_start[li], self.line_no[li]))
+            flat = _line_ins(raw, lineno, self.vocab)
+            self.cache[li] = flat
+            if len(self.cache) > self.CACHE_LINES:
+                self.cache.popitem(last=False)
+        else:
+            self.cache.move_to_end(li)
+        return flat[self.ins_k[i]]
+
+    def __iter__(self):
+        for i in range(len(self.ins_line)):
+            yield self[i]
 
 
 # ---------------------------------------------------------------- frames
@@ -235,6 +337,8 @@ def command(*names: str, target: bool = False, connected: bool = False):
     return deco
 
 
+HEX_RE = re.compile(r"0x[0-9A-Fa-f][0-9A-Fa-f_]*")
+
 SIZES = {"Byte": 1, "Word": 2, "Long": 4, "Quad": 8, "Short": 2, "TByte": 3, "PByte": 5, "HByte": 6,
          "SByte": 7}
 PRINT_FMT = {"Decimal": "dec", "Hex": "hex", "BINary": "bin", "Ascii": "ascii"}
@@ -284,7 +388,11 @@ class Interpreter:
         self._v0 = 0.0
         self._cur: tuple[Program, Stmt] | None = None
         self._in_handler = False
-        self.ev = Evaluator(self._call_function)
+        # Symbols made by sYmbol.CREATE.Label: they exist once sYmbol.CREATE.Done runs (as in TRACE32).
+        self.symbols: dict[str, Addr] = {}
+        self.new_symbols: dict[str, Addr] = {}
+        self.elf_loaded = False             # its debug symbols are not read (see sYmbol.EXIST)
+        self.ev = Evaluator(self._call_function, self.symbols.get)
 
     # ---- output
     def emit(self, text: str, cont: bool = False):
@@ -951,6 +1059,30 @@ class Interpreter:
                 raise PracticeError(f"directory not found: {st.args[0]}")
             self.cwd = p
 
+    # ================================================================ symbols
+    @command("sYmbol.CREATE.Label")
+    def c_symcreate(self, st: Stmt):
+        args = self._raw_args(st.args)
+        if len(args) < 2:
+            raise PracticeError("sYmbol.CREATE.Label <name> <address> expected")
+        text = " ".join(args[1:])
+        if HEX_RE.fullmatch(text):                 # the common generated form: one hex literal
+            a = Addr("C", int(text[2:].replace("_", ""), 16))
+        else:
+            v = self.ev.eval(text)
+            a = v if isinstance(v, Addr) and v.access else Addr("C", to_int(v, "address"))
+        self.new_symbols[args[0]] = a
+
+    @command("sYmbol.CREATE.Done")
+    def c_symdone(self, st: Stmt):
+        self.symbols.update(self.new_symbols)
+        self.new_symbols.clear()
+
+    @command("sYmbol.RESet")
+    def c_symreset(self, st: Stmt):
+        self.symbols.clear()
+        self.new_symbols.clear()
+
     # ================================================================ target commands
     @command("SYStem.CPU", target=True)
     def c_cpu(self, st: Stmt):
@@ -1094,6 +1226,7 @@ class Interpreter:
     @command("Data.LOAD.Elf", connected=True)
     def c_load_elf(self, st):
         self._load(st, "elf")
+        self.elf_loaded = True
 
     @command("Data.LOAD.Binary", connected=True)
     def c_load_bin(self, st):

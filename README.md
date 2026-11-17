@@ -81,6 +81,10 @@ What makes big trees cheap:
 - Links and junctions are never followed, so a link loop can't trap the walk. Version-control and virtualenv directories are skipped.
 - Unreadable files and directories are counted in the report, not silently dropped.
 
+Very large scripts (generated register or symbol tables, often tens of MiB each) are skipped by `scan`, `check` and `inventory` once they pass `--max-file-size` (default 8 MiB). They are never dropped silently: stderr warns with a per-directory count, `inventory` lists them as `OVER THE LIMIT` with the memory a scan would need, the reports state how many were left out, and `check` marks any script that calls one as BROKEN with reason `too_large_script`. Raise the limit to include them, and expect `scan`/`check` to need roughly 10 to 20 times the file size in memory.
+
+`run` is cheaper. A script over 2 MiB is not parsed up front: cmmrun indexes its lines and block structure in one pass and parses each line when it runs, so memory stays around 2 to 4 times the file size. A 100 MiB generated script runs in a few hundred MiB rather than gigabytes.
+
 Measured on a generated test tree of 40,000 files (mostly copies): about 10 s for `scan` and 11 s for `check`. Distinct script text costs about 3.5 s and 60 MiB of memory per MiB, so a few hundred MiB of distinct scripts is fine on a normal PC; for more, split the run with `--exclude` or by subdirectory.
 
 ### What the anonymized report contains

@@ -5,6 +5,13 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
 
 ## Next
 
+0. **Remaining blockers from feedback round 1**, in order: `STOre`, the `Var` command and
+   `Var.VALUE()`, `PER.Set.Field` (read-modify-write with a mask), `PLIST` /
+   `sYmbol.SourcePATH.*` as no-ops, `PRINTF`, the `Data` command, `OS.VERSION()`,
+   `SYStem.CONFIG`, then `ENTER`, `QUIT`, `WRITEB`, `TERM.*`, `WinTABS`, `SYStem.Mode()`.
+   Simulator facts already probed: `OS.VERSION(0)=2`, `(1)=0A`, `(2)=0` on Windows.
+   Optional speed-up: a lazy `run` parses each line twice (index pass + execution); about
+   1.8 MiB/s now (8.3 MiB of `y.create.l` lines in 4.6 s, 68 MiB peak). Measure before changing.
 1. **Evaluate a real script collection.** Run `cmmrun check` over a `.cmm` collection per
    [docs/evaluate-scripts.md](evaluate-scripts.md), bring back the anonymized `cmmrun-check.md`,
    and implement the top-ranked unsupported commands/functions (each validated against the
@@ -36,6 +43,21 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
 - **Date-based versioning** (2026-11-16): switched from semver `0.2.0` to `YYYY.M.D.N`
   (`2026.11.16.0`); `pyproject.toml` now reads the version dynamically from
   `cmmrun/__init__.py`, the single source of truth.
+- **Feedback round 1** (2026-11-17), from a `check` run over a real collection:
+  - Leak guard: dotted names with a digit-led segment (`LOGGER.Mode.64bit`) are no longer
+    redacted.
+  - The 8 MiB per-file cap is now `--max-file-size`. Skipped files are warned on stderr, listed
+    by `inventory`, counted in both reports, and make their callers BROKEN (`too_large_script`).
+  - Memory: the parser shares empty fields, interns names and uses regex fast paths, which cut
+    the parse to about 0.6x the memory and 0.5x the time. `run` parses scripts over 2 MiB lazily
+    (line index plus an LRU of parsed lines): about 2 to 4x the file size instead of 11 to 21x.
+    The golden suite runs in both modes.
+  - New: `OS.PresentPracticeFile()` (OS.PPF), `sYmbol.CREATE.Label` / `.Done`, `sYmbol.RESet`,
+    `sYmbol.EXIST()` and `ADDRESS.OFFSET()`. Pre-flight accepts names the scripts create
+    themselves. `sYmbol.EXIST()` after `Data.LOAD.Elf` is refused, because ELF debug symbols
+    are not read.
+  - Fix: PRINT shows an address with an access class as `C:0x1000` (and ranges as
+    `C:0x1000--0x10FF`), as the simulator does; it used to drop the `0x`.
 
 ## Not built
 
@@ -54,3 +76,8 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
 - **Keep secrets out of the repo.** Probe serials and the private corpus live in machine memory
   and gitignored files. The leak guard (reports) and `tools/name_check.py` (commits) are the
   mechanical guards; run the name check before every commit.
+- **Golden tests only cover what they print.** PRINT of an address had been wrong (`C:1000`)
+  since the start, because no fixture printed one. When adding a value type, add a fixture that
+  prints it.
+- **Huge generated scripts exist** (millions of lines of register or symbol tables). Keep
+  per-statement memory small, and never parse a whole file up front when only running it.

@@ -1,0 +1,13 @@
+; OS.PresentPracticeFile(): the absolute path of the script being run
+PRINT "same:" OS.PPF()==OS.PresentPracticeFile()
+PRINT "longer:" STRing.LENgth(OS.PPF())>STRing.LENgth(OS.PPD())
+PRINT "ends:" STRing.SCAN(OS.PPF(),"ppf.cmm",0)==(STRing.LENgth(OS.PPF())-7.)
+PRINT "starts:" STRing.SCAN(OS.PPF(),OS.PPD(),0)
+GOSUB sub
+DO "~~~~/_ppf_callee.cmm"
+PRINT "back:" STRing.SCAN(OS.PPF(),"_ppf_callee",0)
+ENDDO
+
+sub:
+  PRINT "sub:" STRing.SCAN(OS.PPF(),"ppf.cmm",0)>0
+  RETURN

@@ -19,6 +19,7 @@ import json
 import pathlib
 import sys
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 from ..lang.parser import call_target, jump_target, walk
 from . import functions
@@ -80,23 +81,33 @@ def function_supported(vocab, name: str) -> bool:
     return (m.canon if m.status != "unknown" else name) in functions.REGISTRY or name in functions.REGISTRY
 
 
-def command_supported(canon: str) -> bool:
+@lru_cache(maxsize=1)
+def _support():
     from ..analysis.support import Support
-    return Support().command(canon) != "unsupported"
+    return Support()
+
+
+def command_supported(canon: str) -> bool:
+    return _support().command(canon) != "unsupported"
 
 
 def preflight(it: Interpreter, entry: pathlib.Path) -> Preflight:
     pf = Preflight()
     todo, seen = [entry], set()
     cwd0 = it.cwd
+    created: set[str] = set()       # names the scripts make with sYmbol.CREATE.Label
+    symbol_uses: list[Problem] = []
     try:
-        _walk_scripts(it, pf, todo, seen)
+        _walk_scripts(it, pf, todo, seen, created, symbol_uses)
     finally:
         it.cwd = cwd0           # CD is followed during the walk only
+    # A name the scripts create themselves is fine; any other bare name is a debug symbol.
+    pf.problems += [p for p in symbol_uses if p.detail.split(" ", 1)[0] not in created]
     return pf
 
 
-def _walk_scripts(it: Interpreter, pf: Preflight, todo: list, seen: set):
+def _walk_scripts(it: Interpreter, pf: Preflight, todo: list, seen: set, created: set, symbol_uses: list):
+    unsupported_event = _support().unsupported_event
     while todo:
         path = todo.pop()
         if path in seen:
@@ -118,10 +129,12 @@ def _walk_scripts(it: Interpreter, pf: Preflight, todo: list, seen: set):
                 if st.kind == "command" and st.canon in EXPR_COMMANDS and "&" not in " ".join(st.args):
                     exprs.append(" ".join(a for a in st.args if not a.startswith("%")))
                 for sym in (s for e in exprs for s in symbols_in(e)):
-                    pf.problems.append(Problem(where, "unsupported_symbol",
+                    symbol_uses.append(Problem(where, "unsupported_symbol",
                                                f"{sym} (debug symbols are not supported; use an address)"))
                 if st.kind != "command":
                     continue
+                if st.canon == "sYmbol.CREATE.Label" and st.args and "&" not in st.args[0]:
+                    created.add(st.args[0])
                 for arg in (st.args if st.canon in HOST_PATH_COMMANDS or st.canon.startswith(("Data.LOAD",
                                                                                          "Data.SAVE")) else []):
                     if arg.strip('"').startswith("~~") and not arg.strip('"').startswith("~~~") and not it.t32_sys:
@@ -135,8 +148,7 @@ def _walk_scripts(it: Interpreter, pf: Preflight, todo: list, seen: set):
                 if not canon or not command_supported(canon):
                     pf.problems.append(Problem(where, "unsupported_command", canon or st.cmd))
                     continue
-                from ..analysis.support import Support
-                ev = Support.unsupported_event(st)
+                ev = unsupported_event(st)
                 if ev:
                     pf.problems.append(Problem(where, "unsupported_command", ev))
                     continue

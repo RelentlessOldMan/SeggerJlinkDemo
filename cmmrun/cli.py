@@ -26,6 +26,23 @@ def _common_analysis_args(p):
     p.add_argument("--jobs", type=int, default=16,
                    help="parallel directory listings and file reads (default 16; raise for slow network shares)")
     p.add_argument("--quiet", action="store_true", help="no progress lines on stderr")
+    p.add_argument("--max-file-size", type=_positive_mib, default=8.0, metavar="MIB",
+                   help="skip (and report) scripts larger than this many MiB (default 8). Memory use is "
+                        "roughly 60 MiB per MiB of script, so raise it with care")
+
+
+def _positive_mib(s: str) -> float:
+    try:
+        v = float(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {s!r}") from None
+    if not v > 0:
+        raise argparse.ArgumentTypeError("must be more than 0")
+    return v
+
+
+def _max_bytes(a) -> int:
+    return int(a.max_file_size * 2**20)
 
 
 def _write(out_dir: str, stem: str, data: dict, md: str) -> tuple[pathlib.Path, pathlib.Path]:
@@ -105,7 +122,8 @@ def _finish(a, anon, vocab, data, stem, render):
 
 
 def _mib(n: int) -> str:
-    return f"{n / 2**20:,.1f} MiB"
+    from .corpus import size_text
+    return size_text(n)
 
 
 def cmd_inventory(a) -> int:
@@ -114,8 +132,10 @@ def cmd_inventory(a) -> int:
     if not pathlib.Path(a.root).is_dir():
         print(f"cmmrun: {a.root} is not an existing directory", file=sys.stderr)
         return EXIT_SCRIPT
-    r = inventory(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet, top=a.top)
-    if not r["files"]:
+    r = inventory(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet, top=a.top,
+                  max_bytes=_max_bytes(a))
+    big = r["too_large"]
+    if not r["files"] and not big["files"]:
         print(f"no files with extensions {a.ext} under {a.root}", file=sys.stderr)
         return EXIT_SCRIPT
     dup = 1 - r["distinct_bytes"] / r["bytes"] if r["bytes"] else 0
@@ -125,11 +145,19 @@ def cmd_inventory(a) -> int:
     print(f"distinct content: {r['distinct_files']:,} files, {_mib(r['distinct_bytes'])} ({dup:.0%} of the bytes are copies)")
     print(f"skipped:          {sk}")
     print(f"full scan/check:  about {e['memory_mib']:,} MiB of memory and {e['minutes']} min each (rough estimate)")
+    if big["files"]:
+        print(f"OVER THE LIMIT:   {big['files']:,} files, {_mib(big['bytes'])}, larger than "
+              f"{a.max_file_size:g} MiB: NOT counted above and NOT scanned. The largest is "
+              f"{_mib(big['largest_bytes'])}; scanning it alone needs about {big['largest_memory_mib']:,} MiB "
+              f"of memory (--max-file-size raises the limit)")
     print(f"inventory took {time.time() - t0:.1f} s")
     print("\nlargest top-level directories by distinct content (real names: local only, do not share):")
     w = max([len(t["dir"]) for t in r["top_dirs"]] + [3])
     for t in r["top_dirs"]:
-        print(f"  {t['dir']:<{w}}  {t['files']:>8,} files  {_mib(t['bytes']):>12}  distinct {_mib(t['distinct_bytes']):>12}")
+        line = f"  {t['dir']:<{w}}  {t['files']:>8,} files  {_mib(t['bytes']):>12}  distinct {_mib(t['distinct_bytes']):>12}"
+        if t["too_large_files"]:
+            line += f"  + {t['too_large_files']:,} over the limit ({_mib(t['too_large_bytes'])}, not scanned)"
+        print(line)
     print("\nuse --exclude to leave out archives or copies, e.g. --exclude old '*/archive/*'")
     return EXIT_OK
 
@@ -144,7 +172,8 @@ def cmd_scan(a) -> int:
     except UsageError as e:
         print(f"cmmrun: {e}", file=sys.stderr)
         return EXIT_SCRIPT
-    c = load_corpus(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet)
+    c = load_corpus(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet,
+                    max_bytes=_max_bytes(a))
     if not c.files:
         print(f"no files with extensions {a.ext} under {a.root}", file=sys.stderr)
         return EXIT_SCRIPT
@@ -165,7 +194,8 @@ def cmd_check(a) -> int:
     except UsageError as e:
         print(f"cmmrun: {e}", file=sys.stderr)
         return EXIT_SCRIPT
-    c = load_corpus(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet)
+    c = load_corpus(a.root, tuple(a.ext), excludes=tuple(a.exclude), jobs=a.jobs, progress=not a.quiet,
+                    max_bytes=_max_bytes(a))
     if not c.files:
         print(f"no files with extensions {a.ext} under {a.root}", file=sys.stderr)
         return EXIT_SCRIPT

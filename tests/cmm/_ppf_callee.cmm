@@ -1,0 +1,3 @@
+; called by ppf.cmm: OS.PPF() names this file while it runs
+PRINT "callee:" STRing.SCAN(OS.PPF(),"_ppf_callee.cmm",0)>0
+ENDDO

@@ -136,9 +136,11 @@ def plain(x: Value, fmt: str = "") -> str:
         return x.v
     if isinstance(x, Flt):
         return float_text(x.v)
-    if isinstance(x, Addr):
-        return (x.access + ":" if x.access else "") + hex_plain(x.v)
-    if isinstance(x, Rng):
+    if isinstance(x, Addr):          # with an access class PRINT shows 0x (simulator: C:0x1000)
+        return x.access + ":0x" + hex_digits(x.v) if x.access else hex_plain(x.v)
+    if isinstance(x, Rng):           # C:0x1000--0x10FF, but 1000--10FF without an access class
+        if isinstance(x.lo, Addr) and x.lo.access:
+            return plain(x.lo) + "--0x" + hex_digits(x.hi)
         return plain(x.lo) + "--" + hex_plain(x.hi)
     if isinstance(x, Time):
         return time_text(x.s)

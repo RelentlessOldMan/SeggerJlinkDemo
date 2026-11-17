@@ -100,3 +100,9 @@ def test_every_implemented_command_is_in_the_vocabulary():
     missing = [n for n in set(COMMANDS) | set(IGNORED) | CONTROL
                if not (v.command(n).status == "known" and v.command(n).canon == n)]
     assert not missing
+
+
+def test_guard_keeps_dotted_command_with_digit_segment(corpus):
+    # a command segment that starts with a digit (LOGGER.Mode.64bit) is vocabulary, not a name
+    data, n = guard({"name": "LOGGER.Mode.64bit ON"}, corpus.vocab, ALLOWED_TERMS)
+    assert n == 0 and data["name"] == "LOGGER.Mode.64bit ON"

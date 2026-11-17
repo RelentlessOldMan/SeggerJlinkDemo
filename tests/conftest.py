@@ -1,3 +1,4 @@
+import os
 import pathlib
 
 import pytest
@@ -20,3 +21,11 @@ def corpus():
 def anon(corpus):
     from cmmrun.analysis.anonymize import Anonymizer
     return Anonymizer(corpus.vocab, b"test-salt-0123456789", enabled=True)
+
+
+@pytest.fixture(autouse=True)
+def _lazy_everywhere(monkeypatch):
+    """CMMRUN_TEST_LAZY=1 runs every script through the big-script (lazy) program path."""
+    if os.environ.get("CMMRUN_TEST_LAZY") == "1":
+        from cmmrun.interp import interpreter
+        monkeypatch.setattr(interpreter, "LAZY_BYTES", 0)

@@ -1,0 +1,11 @@
+e0=FALSE
+e1=FALSE
+e2=TRUE  FALSE
+value=C:0x1000
+offset=1000
+plus=C:0x1010
+cmp=TRUE 
+o=TRUE  2004 D:0x3000
+case=FALSE
+if ok
+reset=FALSE

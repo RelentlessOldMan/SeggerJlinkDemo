@@ -11,6 +11,14 @@ from dataclasses import dataclass, field
 MACRO_RE = re.compile(r"&\(([A-Za-z_][A-Za-z0-9_]*)\)|&([A-Za-z_][A-Za-z0-9_]*)")
 LABEL_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):(?!:)")
 DEVICE_PREFIX_RE = re.compile(r"^[A-Za-z]::")
+# Fast paths for the common simple line (generated scripts are millions of them).
+_QUOTES_RE = re.compile(r"[\"']")
+_COMMENT_RE = re.compile(r";|(?:^|(?<=[ \t]))//")
+_GROUPING_RE = re.compile(r"[\"'()\[\]{}]")
+_TOKEN_RE = re.compile(r"[^ \t]+")
+_BRACKETS_RE = re.compile(r"[()\[\]{}]")
+# a token with strings ("a ""b"" c", maybe unterminated) and char literals ('x'), no brackets
+_QTOKEN_RE = re.compile(r"""(?:"(?:[^"]|"")*(?:"|\Z)|'(?s:.)'|[^ \t])+""")
 
 
 @dataclass
@@ -55,20 +63,39 @@ class LogicalLine:
     nphys: int         # number of physical lines joined
 
 
+def normalize_eols(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def iter_logical(text: str, pos: int = 0, lineno: int = 1):
+    """Yield (start offset, text, first line number, physical line count) for each logical line
+    of `text` (which must use LF line ends), from offset `pos`. Lines ending in a backslash (no
+    whitespace after it) are joined with the next line. Streams: nothing is kept."""
+    n = len(text)
+    while True:
+        start = pos
+        end = text.find("\n", pos)
+        if end < 0:
+            end = n
+        cur = text[pos:end]
+        nphys = 1
+        while cur.endswith("\\") and end < n:
+            nxt = end + 1
+            end = text.find("\n", nxt)
+            if end < 0:
+                end = n
+            cur = cur[:-1] + text[nxt:end].lstrip()
+            nphys += 1
+        yield start, cur, lineno, nphys
+        if end >= n:
+            return
+        lineno += nphys
+        pos = end + 1
+
+
 def logical_lines(text: str) -> list[LogicalLine]:
     """Join lines ending in a backslash (no whitespace after it) with the next line."""
-    phys = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    out: list[LogicalLine] = []
-    i = 0
-    while i < len(phys):
-        start = i
-        cur = phys[i]
-        while cur.endswith("\\") and i + 1 < len(phys):
-            i += 1
-            cur = cur[:-1] + phys[i].lstrip()
-        out.append(LogicalLine(cur, start + 1, i - start + 1))
-        i += 1
-    return out
+    return [LogicalLine(cur, lineno, nphys) for _, cur, lineno, nphys in iter_logical(normalize_eols(text))]
 
 
 def strip_comment(s: str) -> tuple[str, str, bool]:
@@ -78,6 +105,9 @@ def strip_comment(s: str) -> tuple[str, str, bool]:
     beginning of a token (line start or after whitespace), so paths such as
     `C://x` or `~~/a//b` are not cut.
     """
+    if not _QUOTES_RE.search(s):
+        m = _COMMENT_RE.search(s)
+        return (s[:m.start()], s[m.start():], False) if m else (s, "", False)
     in_str = False
     i, n = 0, len(s)
     while i < n:
@@ -103,6 +133,10 @@ def strip_comment(s: str) -> tuple[str, str, bool]:
 
 def split_args(s: str) -> list[str]:
     """Split at whitespace that is outside strings, char literals and parentheses."""
+    if not _GROUPING_RE.search(s):
+        return _TOKEN_RE.findall(s)
+    if not _BRACKETS_RE.search(s):
+        return _QTOKEN_RE.findall(s)
     toks: list[str] = []
     cur: list[str] = []
     depth = 0

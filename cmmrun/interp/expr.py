@@ -137,8 +137,10 @@ BINARY = {op: lvl for lvl, ops in enumerate(LEVELS) for op in ops}
 class Evaluator:
     """Evaluates token streams. `call(name, args_text_list, arg_values_thunk)` runs functions."""
 
-    def __init__(self, call: Callable[[str, list[str], "Evaluator"], Value]):
+    def __init__(self, call: Callable[[str, list[str], "Evaluator"], Value],
+                 symbol: Callable[[str], "Value | None"] | None = None):
         self.call = call
+        self.symbol = symbol        # name -> value of a symbol created by the script, or None
         self.toks: list[Tok] = []
         self.i = 0
         self.src = ""
@@ -235,6 +237,9 @@ class Evaluator:
                 self.i += 2
                 v = self._unary()
                 return Addr(t.text.upper(), to_int(v, "address"))
+            if self.symbol is not None and (sv := self.symbol(t.text)) is not None:
+                self.i += 1
+                return sv
             raise UnsupportedError(f"symbol {t.text!r}: debug symbols are not supported (use an address)")
         if t.kind == "end":
             raise PracticeError(f"expression expected in {self.src!r}")

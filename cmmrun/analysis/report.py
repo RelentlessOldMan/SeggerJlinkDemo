@@ -33,7 +33,7 @@ reason reasons kind unsupported ignored supported partial_support support_table 
 missing_script t32_system_script parse_error dynamic_unresolved via chain entry tree
 per_entry_script resolved_lines dynamic_lines blocked_by broken_by entry_only all_files
 calls callees depth elapsed_s review before sharing it should contain only names counts ids and backend jlink mock missing_label unknown_command
-unknown_function function more
+unknown_function function more max_file_mib too_large_mib too_large_script
 """.split())
 
 
@@ -81,6 +81,9 @@ def scan_markdown(r: dict, top: int = 60) -> str:
     L.append("## Corpus")
     L.append(f"- Files: **{c['files']}**, of which {c.get('duplicates', 0)} are byte-identical copies "
              f"(skipped: {_kv(c['skipped'])})")
+    if c["skipped"].get("too_large"):
+        L.append(f"- **Not scanned: {c['skipped']['too_large']} file(s) over the {c.get('max_file_mib', 8)} MiB "
+                 f"limit, {c.get('too_large_mib', 0):,} MiB in all** (raise with `--max-file-size`)")
     L.append(f"- Lines: {t.get('physical_lines', 0)} physical; {t.get('code_lines', 0)} code, "
              f"{t.get('comment_lines', 0)} comment, {t.get('blank_lines', 0)} blank, "
              f"{t.get('continued_lines', 0)} continued")
@@ -164,6 +167,10 @@ def check_markdown(r: dict, top_blockers: int = 30, list_files: int = 200) -> st
     L.append(f"Tool {r['tool_version']}, schema `{r['schema']}`, anonymized: **{r['anonymized']}**.")
     if "leak_guard_redactions" in r:
         L.append(f"Leak guard redactions: {r['leak_guard_redactions']} (0 expected).")
+    if r.get("skipped", {}).get("too_large"):
+        L.append(f"**Not analysed: {r['skipped']['too_large']} file(s) over the {r.get('max_file_mib', 8)} MiB limit, "
+                 f"{r.get('too_large_mib', 0):,} MiB in all** (raise with `--max-file-size`). Scripts that call them "
+                 "are BROKEN with reason `too_large_script`.")
     L.append("")
     L.append("Verdict meanings: RUNNABLE = everything supported; RESOLVED = dynamic lines, but every possible value "
              "is known and supported; DYNAMIC = needs `--allow-dynamic` (values known only at run time); "

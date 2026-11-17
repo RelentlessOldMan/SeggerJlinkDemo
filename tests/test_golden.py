@@ -8,6 +8,7 @@ import pathlib
 import pytest
 
 from cmmrun.backends.mock import MockBackend
+from cmmrun.interp import interpreter
 from cmmrun.interp.interpreter import Interpreter
 
 CMM = pathlib.Path(__file__).parent / "cmm"
@@ -25,8 +26,11 @@ def run_script(path: pathlib.Path) -> list[str]:
     return it.out_lines
 
 
+@pytest.mark.parametrize("lazy", [False, True], ids=["eager", "lazy"])
 @pytest.mark.parametrize("path", CASES, ids=[p.stem for p in CASES])
-def test_matches_trace32(path):
+def test_matches_trace32(path, lazy, monkeypatch):
+    if lazy:        # the big-script path: parse on demand from an index
+        monkeypatch.setattr(interpreter, "LAZY_BYTES", 0)
     expected = path.with_suffix(".expected").read_text(encoding="utf-8").splitlines()
     got = run_script(path)
     diffs = [f"line {i + 1}: expected {e!r}, got {g!r}"

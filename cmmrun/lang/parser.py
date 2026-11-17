@@ -7,7 +7,8 @@ The interpreter builds its block structure from the same statement list.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+import sys
+from dataclasses import dataclass
 
 from . import lexer
 from .vocab import Match, Vocab, load
@@ -32,16 +33,18 @@ class Stmt:
     text: str = ""                # code text (comment removed)
     cmd: str = ""                 # command as typed
     match: Match | None = None    # vocabulary match of the command
-    args: list[str] = field(default_factory=list)
-    options: list[str] = field(default_factory=list)
+    args: list[str] | tuple = ()
+    options: list[str] | tuple = ()
     # assign
     name: str = ""
     rhs: str = ""
     recursive: bool = False
     # derived
-    macros: list[str] = field(default_factory=list)
-    functions: list[str] = field(default_factory=list)
-    dynamic: list[str] = field(default_factory=list)   # dynamic positions, see classify_dynamic
+    macros: list[str] | tuple = ()
+    functions: list[str] | tuple = ()
+    dynamic: list[str] | tuple = ()   # dynamic positions, see classify_dynamic
+    # Empty list fields share one `()`: a huge generated script has millions of statements
+    # and four empty lists each cost 224 bytes. Never mutate these fields in place.
     inline: "Stmt | None" = None   # IF c <stmt>, RePeaT n <stmt>, ...
     block_mode: str = ""           # (&+  (&-  (&
     depth: int = 0                 # block nesting depth
@@ -111,13 +114,15 @@ def parse_statement(code: str, lineno: int, v: Vocab, _depth: int = 0) -> Stmt |
     if m := ASSIGN_RE.match(s):
         rhs = m.group(3).strip()
         st = Stmt("assign", lineno, s, name=m.group(2), rhs=rhs, recursive=len(m.group(1)) == 2)
-        st.macros = lexer.macros_in(rhs)
-        st.functions = functions_in(rhs)
+        st.macros = lexer.macros_in(rhs) or ()
+        st.functions = functions_in(rhs) or ()
         return st
     toks = lexer.split_args(s)
     if not toks:
         return None
-    cmd, args = toks[0], toks[1:]
+    cmd, args = sys.intern(toks[0]), toks[1:]
+    if len(s) <= 24:
+        s = sys.intern(s)        # short lines repeat a lot in generated scripts
     st = Stmt("command", lineno, s, cmd=cmd, match=_cmd_match(v, cmd))
     canon = st.canon
     if canon in ("IF", "ELSE", "WHILE", "RePeaT") and args and args[-1] == "(":
@@ -136,18 +141,20 @@ def parse_statement(code: str, lineno: int, v: Vocab, _depth: int = 0) -> Stmt |
             elif inner and inner.kind == "command" and inner.match.status == "known":
                 st.inline = inner
                 args = head
-    st.args = args
-    st.options = [a for a in args if lexer.is_option(a)]
-    st.macros = lexer.macros_in(" ".join([cmd] + args))
-    st.functions = functions_in(" ".join(args))
+    st.args = args or ()
+    st.options = [a for a in args if lexer.is_option(a)] or ()
+    if "&" in s:
+        st.macros = lexer.macros_in(" ".join([cmd] + args)) or ()
+    if "(" in s:
+        st.functions = functions_in(" ".join(args)) or ()
     return st
 
 
-def classify_dynamic(st: Stmt) -> list[str]:
+def classify_dynamic(st: Stmt) -> list[str] | tuple:
     """Where macros make the line's meaning unknown until run time."""
+    if st.kind != "command" or "&" not in st.text:
+        return ()
     out = []
-    if st.kind != "command":
-        return out
     canon = st.canon
     if "&" in st.cmd:
         lit = st.cmd.split("&", 1)[0]
@@ -163,7 +170,7 @@ def classify_dynamic(st: Stmt) -> list[str]:
         out.append("jump_target")
     if not out and any("&" in a for a in pos_args):
         out.append("args_only")
-    return out
+    return out or ()
 
 
 def _call_target(st: Stmt) -> str:
@@ -199,40 +206,55 @@ def jump_target(st: Stmt) -> str:
     return ""
 
 
+def parse_line(raw: str, lineno: int, v: Vocab):
+    """One logical line: (label name or None, statement or None, unterminated string, comment,
+    whether there is code). The statement can be None even with code (`B::` alone).
+
+    Dynamic positions are classified on the statement and its inline chain; block depth is not
+    (it depends on the lines before)."""
+    label = None
+    body = raw
+    if m := lexer.LABEL_RE.match(raw):
+        label = m.group(1)
+        body = raw[m.end():]
+    code, comment, unterminated = lexer.strip_comment(body)
+    has_code = bool(code.strip())
+    st = parse_statement(code, lineno, v) if has_code else None
+    chain = st
+    while chain is not None:
+        chain.dynamic = classify_dynamic(chain)
+        chain = chain.inline
+    return label, st, unterminated, comment, has_code
+
+
 def parse_text(text: str, v: Vocab | None = None) -> ParsedFile:
     v = v or load()
     stmts: list[Stmt] = []
     labels: dict[str, int] = {}
     subs: dict[str, int] = {}
     issues: list[str] = []
-    n_comment = n_blank = n_code = n_cont = 0
+    n_phys = n_comment = n_blank = n_code = n_cont = 0
     depth = max_depth = 0
-    lines = lexer.logical_lines(text)
-    n_phys = sum(ll.nphys for ll in lines)
-    for ll in lines:
-        raw = ll.text
-        if ll.nphys > 1:
+    for _, raw, lineno, nphys in lexer.iter_logical(lexer.normalize_eols(text)):
+        n_phys += nphys
+        if nphys > 1:
             n_cont += 1
         if not raw.strip():
             n_blank += 1
             continue
-        body = raw
-        if m := lexer.LABEL_RE.match(raw):
-            name = m.group(1)
-            if name in labels:
+        label, st, unterminated, comment, has_code = parse_line(raw, lineno, v)
+        if label is not None:
+            if label in labels:
                 issues.append("duplicate_label")
-            labels[name] = ll.lineno
-            stmts.append(Stmt("label", ll.lineno, name=name, depth=depth))
-            body = raw[m.end():]
-        code, comment, unterminated = lexer.strip_comment(body)
+            labels[label] = lineno
+            stmts.append(Stmt("label", lineno, name=label, depth=depth))
         if unterminated:
             issues.append("unterminated_string")
-        if not code.strip():
+        if not has_code:
             if comment:
                 n_comment += 1
             continue
         n_code += 1
-        st = parse_statement(code, ll.lineno, v)
         if st is None:
             continue
         chain = st
@@ -247,12 +269,11 @@ def parse_text(text: str, v: Vocab | None = None) -> ParsedFile:
                     issues.append("unbalanced_close")
                     depth = 0
             chain.depth = depth
-            chain.dynamic = classify_dynamic(chain)
             if chain.kind == "block_open":
                 depth += 1
                 max_depth = max(max_depth, depth)
             if chain.canon == "SUBROUTINE" and chain.args:
-                subs[chain.args[0]] = ll.lineno
+                subs[chain.args[0]] = lineno
             chain = chain.inline
         stmts.append(st)
     if depth > 0:
