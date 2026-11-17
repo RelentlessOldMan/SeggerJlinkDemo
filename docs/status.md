@@ -5,11 +5,12 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
 
 ## Next
 
-0. **Remaining blockers from feedback round 1**, in order: the `Var` command and
-   `Var.VALUE()` (needs ELF/DWARF debug info: a large feature), the `Data` command,
-   `SYStem.CONFIG`, then `WRITEB`, `TERM.*`, `WinTABS`, `SYStem.Mode()`. `STOre` is done for
-   `Win` / `HISTory`; the next `check` report shows which other items are used (as
-   `STOre <item>` blockers).
+0. **Remaining blockers from feedback round 1**: the `Var` command and `Var.VALUE()` (needs
+   ELF/DWARF debug info: a large feature), and `TERM.WRITE` / `TERM.CLOSE` (the target
+   terminal; a J-Link could use RTT, not started). `STOre` is done for `Win` / `HISTory`; the
+   next `check` report shows which other items are used (as `STOre <item>` blockers).
+   Unverified: `SYStem.Mode()` after Attach or Prepare on real hardware (the simulator says
+   0x0B, as for Up).
    Optional speed-up: a lazy `run` parses each line twice (index pass + execution); about
    1.8 MiB/s now (8.3 MiB of `y.create.l` lines in 4.6 s, 68 MiB peak). Measure before changing.
 1. **Evaluate a real script collection.** Run `cmmrun check` over a `.cmm` collection per
@@ -71,6 +72,11 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
     person at the keyboard). End of input is a script error.
   - `PLIST` and `sYmbol.SourcePATH.*` are ignored (GUI and source-view only).
   - Fix: `%CONTinue` appends to the previous output line, as in TRACE32.
+  - `SYStem.Mode <mode>` (the spaced form of `SYStem.Mode.Up` etc.) and `SYStem.Mode()`
+    (0 down, 0x0B up). `SYStem.CONFIG <key> <value>`: `DEBUGPORTTYPE` is applied; other keys
+    are recorded with a warning, since the J-Link finds the debug logic itself.
+  - `WRITEB #n <values>` writes raw bytes. `Data` (the dump window) and `WinTABS` are
+    ignored.
   - `STOre <file> Win|HISTory` writes a restore script in TRACE32's frame (dated comment,
     `B::`, `ENDDO`), so a later `DO` of it works. Items with debugger state (`SYStem`, `Break`,
     ...) are refused by `check`, pre-flight and the run, since replaying them resets the target.

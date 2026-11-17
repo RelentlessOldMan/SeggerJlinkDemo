@@ -379,6 +379,13 @@ def _sysup(it, a, ev):
     return Bool(it.backend.connected)
 
 
+@fn("SYStem.Mode")
+def _sysmode(it, a, ev):
+    # Simulator: 0 when down, 0x0B when up (Attach and Prepare also read 0x0B there; real
+    # hardware may report other values for those, unverified).
+    return Num(0x0B if it.backend.connected else 0, "hex")
+
+
 def call(it: "Interpreter", canon: str, args: list[str], ev: Evaluator) -> Value:
     f = REGISTRY.get(canon)
     if f is None:

@@ -297,6 +297,13 @@ class Files:
             raise PracticeError(f"file #{ch} is open for reading")
         f["f"].write(text + "\n")
 
+    def write_bytes(self, ch: str, data: bytes):
+        f = self._get(ch)
+        if f["mode"] == "r":
+            raise PracticeError(f"file #{ch} is open for reading")
+        f["f"].flush()
+        f["f"].buffer.write(data)
+
     def eof(self, ch: str) -> bool:
         return self.h.get(ch, {}).get("eof", True)
 
@@ -316,6 +323,7 @@ TARGET_COMMANDS: set[str] = set()   # talk to the target (the rest is pure langu
 NEEDS_CONNECTION: set[str] = set()  # fail with a target error unless SYStem.Up was done
 
 IGNORED = set("""
+Data WinTABS
 WinCLEAR WinPOS WinPAGE WinRESIZE WinTOP WinEXT WinOverlay WinFreeze WinPrint
 AREA AREA.view AREA.Create AREA.Select AREA.CLEAR AREA.Delete AREA.CLOSE AREA.OPEN AREA.RESet
 SCREEN SCREEN.ON SCREEN.OFF SCREEN.display SCREEN.WAIT SCREEN.ALways
@@ -1126,6 +1134,22 @@ class Interpreter:
             raise PracticeError("WRITE #<n> expected")
         self.files.write(st.args[0].lstrip("#"), self._text_of(st.args[1:]))
 
+    @command("WRITEB")
+    def c_writeb(self, st: Stmt):
+        """WRITEB #<n> <value>...: raw bytes, no newline; a number gives its low byte, a string
+        its characters (simulator: WRITEB #1 0x41 0x42 0x343 "xy" writes ABCxy)."""
+        if not st.args:
+            raise PracticeError("WRITEB #<n> expected")
+        data = bytearray()
+        for kind, x in self.ev.items(" ".join(st.args[1:])):
+            if kind != "val":
+                continue
+            if isinstance(x, Str):
+                data += x.v.encode("cp1252", errors="replace")
+            else:
+                data.append(to_int(x, "byte") & 0xFF)
+        self.files.write_bytes(st.args[0].lstrip("#"), bytes(data))
+
     # STOre items that only hold GUI state, which cmmrun ignores; restoring them is a no-op.
     STORE_GUI_ITEMS = {"WIN", "HISTORY"}
 
@@ -1200,7 +1224,9 @@ class Interpreter:
 
     @command("SYStem.CONFIG.DEBUGPORTTYPE", target=True)
     def c_debugport(self, st: Stmt):
-        a = self._raw_args(st.args)
+        self._debugport(self._raw_args(st.args))
+
+    def _debugport(self, a: list[str]):
         port = a[0].upper() if a else ""
         if port not in ("SWD", "JTAG"):
             raise UnsupportedError(f"SYStem.CONFIG.DEBUGPORTTYPE {port or '?'}: only SWD and JTAG are supported")
@@ -1228,6 +1254,34 @@ class Interpreter:
     def c_down(self, st: Stmt):
         if self.backend.connected:
             self.backend.disconnect()
+
+    SYSTEM_MODES = {"UP": "c_up", "ATTACH": "c_attach", "PREPARE": "c_prepare", "GO": "c_sysgo",
+                    "DOWN": "c_down", "NODEBUG": "c_down"}
+
+    @command("SYStem.Mode", target=True)
+    def c_sysmode(self, st: Stmt):
+        """SYStem.Mode <mode>: the same as SYStem.Mode.<mode> (a unique prefix is enough)."""
+        a = self._raw_args(st.args)
+        word = a[0].upper() if a else ""
+        hits = [m for m in self.SYSTEM_MODES if word and m.startswith(word)]
+        if len(hits) != 1:
+            raise UnsupportedError(f"SYStem.Mode {a[0] if a else '?'}: only "
+                                   "Up, Attach, Prepare, Go, Down and NoDebug are supported")
+        getattr(self, self.SYSTEM_MODES[hits[0]])(st)
+
+    @command("SYStem.CONFIG", target=True)
+    def c_sysconfig(self, st: Stmt):
+        """SYStem.CONFIG <key> <value>: DEBUGPORTTYPE is applied; other keys describe the debug
+        logic (core count, base addresses, ...), which the J-Link finds itself, so they are
+        recorded with a warning rather than applied."""
+        a = self._raw_args(st.args)
+        if not a:
+            return                      # TRACE32 opens the configuration dialog
+        if a[0].upper() == "DEBUGPORTTYPE":
+            self._debugport(a[1:])
+            return
+        self.backend.set_option("config." + a[0].upper(), " ".join(a[1:]))
+        self.warnings.append(f"SYStem.CONFIG {a[0]} is recorded but not applied to the probe")
 
     @command("SYStem.RESet", target=True)
     def c_sysreset(self, st: Stmt):

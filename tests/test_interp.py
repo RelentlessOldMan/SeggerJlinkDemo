@@ -240,3 +240,24 @@ def test_preflight_refuses_store_of_debugger_state(tmp_path, capsys):
     assert code == 0, err
     code, err = _run_cli(tmp_path, 'SYStem.Up\nSTOre "st.cmm" Win SYStem\nENDDO\n', capsys)
     assert code == 5 and "STOre SYStem" in err
+
+
+def test_writeb_writes_raw_bytes(tmp_path):
+    # Simulator: WRITEB #1 0x41 0x42 0x343 then "xy" 0x0A gives the bytes "ABCxy\n"
+    run(tmp_path, 'OPEN #1 "w.bin" /Create\nWRITE #1 "t"\nWRITEB #1 0x41 0x42 0x343\n'
+                  'WRITEB #1 "xy" 0x0A 0x96\nCLOSE #1\nENDDO\n')
+    assert (tmp_path / "w.bin").read_bytes() == b"t\nABCxy\n\x96"
+
+
+def test_system_config_keys(tmp_path):
+    it = run(tmp_path, "SYStem.CONFIG DEBUGPORTTYPE JTAG\nSYStem.CONFIG CoreNumber 2.\nENDDO\n")
+    assert it.backend.options["interface"] == "jtag"
+    assert it.backend.options["config.CORENUMBER"] == "2."
+    assert any("CoreNumber" in w for w in it.warnings)
+    fails(tmp_path, "SYStem.CONFIG DEBUGPORTTYPE SWV\nENDDO\n", "only SWD and JTAG")
+
+
+def test_system_mode_command(tmp_path):
+    it = run(tmp_path, "SYStem.Mode Up\nPRINT SYStem.Mode()\nSYStem.Mode NoDebug\nPRINT SYStem.Up()\nENDDO\n")
+    assert it.out_lines == ["0B", "FALSE"]
+    fails(tmp_path, "SYStem.Mode StandBy\nENDDO\n", "only Up, Attach")

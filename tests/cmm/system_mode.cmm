@@ -1,0 +1,14 @@
+; SYStem.Mode <mode> as a command, SYStem.Mode() as a function, SYStem.CONFIG <key> <value>,
+; and GUI-only Data / WinTABS
+SYStem.CPU CortexM4
+PRINT "down=" SYStem.Mode()
+SYStem.CONFIG DEBUGPORTTYPE JTAG
+SYStem.Mode Up
+PRINT "up=" SYStem.Mode()
+Data SD:0x20000000
+WinTABS 10. 20.
+SYStem.Mode Down
+PRINT "down=" SYStem.Mode()
+SYStem.Mode Attach
+PRINT "attach=" SYStem.Mode() " " SYStem.Up()
+ENDDO
