@@ -179,7 +179,8 @@ def check(c: Corpus, anon: Anonymizer, backend: str = "jlink", hints: str | None
                 res.blockers.add(("command", canon))
             elif sup.unsupported_event(st):
                 ev = sup.unsupported_event(st)
-                res.blockers.add(("command", ev if v.is_word(ev.split(" ", 1)[1]) else "ON <other>"))
+                head, arg = ev.split(" ", 1)
+                res.blockers.add(("command", ev if v.is_word(arg) else f"{head} <other>"))
         else:
             res.blockers.add(("unknown_command", anon.command(st)))
         for fn in st.functions:

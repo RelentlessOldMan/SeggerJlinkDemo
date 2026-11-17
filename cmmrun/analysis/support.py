@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from ..interp import functions
 from ..lang import lexer
-from ..interp.interpreter import COMMANDS, IGNORED, TARGET_COMMANDS
+from ..interp.interpreter import COMMANDS, IGNORED, TARGET_COMMANDS, Interpreter
+
+STORE_GUI_ITEMS = Interpreter.STORE_GUI_ITEMS
 
 # Handled by the interpreter's control flow rather than a command method.
 CONTROL = {"IF", "ELSE", "WHILE", "RePeaT", "LOCAL", "PRIVATE", "GLOBAL", "ENTRY", "PARAMETERS", "RETURNVALUES", "ENTER"}
@@ -37,11 +39,19 @@ class Support:
 
     @staticmethod
     def unsupported_event(st) -> str | None:
-        """`ON <event>` is supported only for ERROR; the name of the unsupported form otherwise."""
-        if st.kind != "command" or st.canon != "ON":
+        """The unsupported form of a command that is supported only with some arguments:
+        `ON <event>` (only ERROR) and `STOre <file> <item>` (only GUI items); else None."""
+        if st.kind != "command":
             return None
-        ev = on_event(st)
-        return None if ev == "ERROR" else f"ON {ev or '?'}"
+        if st.canon == "ON":
+            ev = on_event(st)
+            return None if ev == "ERROR" else f"ON {ev or '?'}"
+        if st.canon == "STOre":
+            pos = [a for a in st.args if not lexer.is_option(a)]
+            for item in pos[1:]:
+                if "&" not in item and item.upper() not in STORE_GUI_ITEMS:
+                    return f"STOre {item}"
+        return None
 
 
 def on_event(st) -> str:

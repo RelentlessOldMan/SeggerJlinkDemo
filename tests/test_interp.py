@@ -220,3 +220,23 @@ def test_quit_sets_the_exit_code(tmp_path, capsys, body, code):
     assert got == code, err
     it = run(tmp_path, f'PRINT "before"\n{body}\nPRINT "after"\n')
     assert it.out_lines == ["before"] and it.quit_code == code
+
+
+def test_store_gui_items_writes_a_restorable_script(tmp_path):
+    it = run(tmp_path, 'STOre "saved.cmm" Win HISTory\nWinCLEAR\nDO "saved.cmm"\nPRINT "restored"\nENDDO\n')
+    assert it.out_lines == ["restored"]
+    text = (tmp_path / "saved.cmm").read_text()
+    assert text.startswith("// cmmrun ") and "B::" in text and text.endswith("ENDDO\n")
+
+
+def test_store_debugger_state_is_unsupported(tmp_path):
+    from cmmrun.interp.values import UnsupportedError
+    assert isinstance(fails(tmp_path, 'STOre "state.cmm" Win SYStem\nENDDO\n', "STOre SYStem"), UnsupportedError)
+    assert not (tmp_path / "state.cmm").exists()
+
+
+def test_preflight_refuses_store_of_debugger_state(tmp_path, capsys):
+    code, err = _run_cli(tmp_path, 'STOre "st.cmm" Win\nENDDO\n', capsys)
+    assert code == 0, err
+    code, err = _run_cli(tmp_path, 'SYStem.Up\nSTOre "st.cmm" Win SYStem\nENDDO\n', capsys)
+    assert code == 5 and "STOre SYStem" in err

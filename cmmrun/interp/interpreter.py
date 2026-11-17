@@ -1126,6 +1126,27 @@ class Interpreter:
             raise PracticeError("WRITE #<n> expected")
         self.files.write(st.args[0].lstrip("#"), self._text_of(st.args[1:]))
 
+    # STOre items that only hold GUI state, which cmmrun ignores; restoring them is a no-op.
+    STORE_GUI_ITEMS = {"WIN", "HISTORY"}
+
+    @command("STOre")
+    def c_store(self, st: Stmt):
+        """STOre <file> <item>...: TRACE32 writes a script that restores the items (a dated
+        comment, B::, the commands, ENDDO). cmmrun writes the same frame for GUI-only items, so a
+        later DO of the file works; items with debugger state (SYStem, Break, ...) are refused."""
+        args = [a for a in st.args if not lexer.is_option(a)]
+        if len(args) < 2:
+            raise PracticeError("STOre <file> <item> expected")
+        items = self.substitute(" ".join(args[1:])).split()
+        other = [i for i in items if i.upper() not in self.STORE_GUI_ITEMS]
+        if other:
+            raise UnsupportedError(f"STOre {' '.join(other)}: only the GUI items Win and HISTory "
+                                   "are supported (their state is not kept by cmmrun)")
+        p = self.resolve_host_path(args[0])
+        with open(p, "w", encoding="cp1252", errors="replace", newline="\n") as f:
+            f.write(f"// cmmrun {time.strftime('%a %b %d %H:%M:%S %Y')}\n\nB::\n\n"
+                    f"; {' '.join(items)}: GUI state, not kept by cmmrun\n\nENDDO\n")
+
     @command("APPEND")
     def c_append(self, st: Stmt):
         if not st.args:
