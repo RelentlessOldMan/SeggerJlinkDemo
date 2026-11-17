@@ -1,0 +1,33 @@
+; PER.Set.Field: read-modify-write of the bits in a mask; the value is shifted to the mask's
+; lowest set bit and masked
+SYStem.CPU CortexM4
+SYStem.Up
+Data.Set SD:0x20000100 %Long 0x12345678
+PER.Set.Field SD:0x20000100 %Long 0x0000FF00 0xAB
+PRINT "a=" Data.Long(SD:0x20000100)
+Data.Set SD:0x20000100 %Long 0x12345678
+PER.Set.Field SD:0x20000100 %Long 0x0000FF00 0xAB00
+PRINT "b=" Data.Long(SD:0x20000100)
+Data.Set SD:0x20000100 %Long 0x12345678
+PER.Set.Field SD:0x20000100 %Long 0xF0 0x1FF
+PRINT "c=" Data.Long(SD:0x20000100)
+Data.Set SD:0x20000100 %Long 0x12345678
+PER.Set.Field SD:0x20000100 %Word 0xF000 0x9
+PRINT "d=" Data.Long(SD:0x20000100)
+Data.Set SD:0x20000100 %Long 0x12345678
+PER.Set.Field SD:0x20000100 %Byte 0x03 0x0
+PRINT "e=" Data.Long(SD:0x20000100)
+Data.Set SD:0x20000100 %Quad 0x1122334412345678
+PER.Set.Field SD:0x20000100 %Long 0x80000000 1
+PRINT "f=" Data.Quad(SD:0x20000100)
+PER.Set.Field SD:0x20000100 %Quad 0xFF00000000000000 0x9A
+PRINT "g=" Data.Quad(SD:0x20000100)
+PER.Set.Field SD:0x20000100 %Long 0x00F0F000 0xFFF
+PRINT "h=" Data.Quad(SD:0x20000100)
+PER.Set.Field SD:0x20000100 %Long 0x0 0x5
+PRINT "i=" Data.Quad(SD:0x20000100)
+&reg=0x20000100
+&v=3
+PER.Set.Field SD:&reg %Long 0x3<<4. &v
+PRINT "j=" Data.Long(SD:0x20000100)
+ENDDO

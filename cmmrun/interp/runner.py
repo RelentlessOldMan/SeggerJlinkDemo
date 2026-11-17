@@ -249,6 +249,8 @@ def run_cli(a) -> int:
         print(f"cmmrun: {f}", file=sys.stderr)
     finally:
         backend.close()
+    if code == EXIT_OK and it.quit_code:
+        code = it.quit_code             # QUIT <n>: TRACE32's exit code, passed through
     if out.started:
         sys.stdout.write("\n")
     sys.stdout.flush()

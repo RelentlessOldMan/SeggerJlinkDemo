@@ -1,4 +1,6 @@
 """Interpreter behaviour against the mock target that the TRACE32 golden files can't cover."""
+import sys
+
 import pytest
 
 from cmmrun.backends.mock import MockBackend
@@ -167,3 +169,54 @@ def test_symbol_exist_after_elf_load_is_unsupported(tmp_path):
     s.write_text("PRINT sYmbol.EXIST(main)\nENDDO\n")
     with pytest.raises(ScriptFailure, match="debug symbols"):
         it.run(s)
+
+
+def test_enter_reads_a_line_and_fails_at_end_of_input(tmp_path):
+    import io
+    s = tmp_path / "m.cmm"
+    s.write_text('LOCAL &a &b\nloop:\nENTER &a &b\nPRINT "got:&a/&b"\nGOTO loop\n')
+    it = Interpreter(MockBackend())
+    it.stdin = io.StringIO('GPIOA "two words"\nRCC\n')
+    with pytest.raises(ScriptFailure, match="ENTER: no input"):
+        it.run(s)
+    assert it.out_lines == ['got:GPIOA/"two words"', "got:RCC/"]
+
+
+# The simulator rejects each of these (STDPAR_101 wrong result type, STDPAR_100 expression
+# expected, cbf_nomorearg); they are script errors that ON ERROR can catch.
+@pytest.mark.parametrize("line,match", [
+    ('PRINTF "%s" 0x12', "wrong result type"),
+    ('PRINTF "%d" "abc"', "wrong result type"),
+    ('PRINTF "%c" "A"', "wrong result type"),
+    ('PRINTF "%d %d" 1.', "expression expected"),
+    ('PRINTF "%d" 1. 2.', "no more arguments"),
+])
+def test_printf_errors(tmp_path, line, match):
+    from cmmrun.interp.values import PracticeError
+    assert isinstance(fails(tmp_path, line + "\nENDDO\n", match), PracticeError)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="OS.VERSION() is only known for Windows hosts")
+def test_os_version_on_windows(tmp_path):
+    it = run(tmp_path, 'PRINT OS.VERSION(0) " " OS.VERSION(1) " " OS.VERSION(4)\nENDDO\n')
+    from cmmrun.interp.values import Num, plain
+    assert it.out_lines == [f"2 {plain(Num(sys.getwindowsversion().major))} 0"]    # 10 prints 0A
+
+
+@pytest.mark.parametrize("line,match", [
+    ("PER.Set.Field SD:0x100 0xFF00 0xAB", "only <address>"),         # TRACE32: silently nothing
+    ("PER.Set.Field SD:0x100 %Long 0xFF00", "only <address>"),        # TRACE32: silently nothing
+    ("PER.Set.Field SD:0x100 %Long 0xFF00 0xAB /Verify", "too many keywords"),
+])
+def test_per_set_field_refuses_forms_that_would_skip_the_write(tmp_path, line, match):
+    it_text = "SYStem.Up\nData.Set SD:0x100 %Long 0x12345678\n" + line + "\nENDDO\n"
+    fails(tmp_path, it_text, match)
+
+
+# Simulator: QUIT ends the script and TRACE32 exits with the code (QUIT -> 0, QUIT 0x10 -> 16).
+@pytest.mark.parametrize("body,code", [("QUIT", 0), ("QUIT 3", 3), ("QUIT 0x10", 16), ("&c=7\nQUIT &c", 7)])
+def test_quit_sets_the_exit_code(tmp_path, capsys, body, code):
+    got, err = _run_cli(tmp_path, f'PRINT "before"\n{body}\nPRINT "after"\n', capsys)
+    assert got == code, err
+    it = run(tmp_path, f'PRINT "before"\n{body}\nPRINT "after"\n')
+    assert it.out_lines == ["before"] and it.quit_code == code

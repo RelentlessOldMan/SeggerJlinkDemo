@@ -13,7 +13,7 @@ from ..lang import lexer
 from ..interp.interpreter import COMMANDS, IGNORED, TARGET_COMMANDS
 
 # Handled by the interpreter's control flow rather than a command method.
-CONTROL = {"IF", "ELSE", "WHILE", "RePeaT", "LOCAL", "PRIVATE", "GLOBAL", "ENTRY", "PARAMETERS", "RETURNVALUES"}
+CONTROL = {"IF", "ELSE", "WHILE", "RePeaT", "LOCAL", "PRIVATE", "GLOBAL", "ENTRY", "PARAMETERS", "RETURNVALUES", "ENTER"}
 
 
 class Support:

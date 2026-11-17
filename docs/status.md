@@ -6,10 +6,8 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
 ## Next
 
 0. **Remaining blockers from feedback round 1**, in order: `STOre`, the `Var` command and
-   `Var.VALUE()`, `PER.Set.Field` (read-modify-write with a mask), `PLIST` /
-   `sYmbol.SourcePATH.*` as no-ops, `PRINTF`, the `Data` command, `OS.VERSION()`,
-   `SYStem.CONFIG`, then `ENTER`, `QUIT`, `WRITEB`, `TERM.*`, `WinTABS`, `SYStem.Mode()`.
-   Simulator facts already probed: `OS.VERSION(0)=2`, `(1)=0A`, `(2)=0` on Windows.
+   `Var.VALUE()` (needs ELF/DWARF debug info: a large feature), the `Data` command,
+   `SYStem.CONFIG`, then `WRITEB`, `TERM.*`, `WinTABS`, `SYStem.Mode()`.
    Optional speed-up: a lazy `run` parses each line twice (index pass + execution); about
    1.8 MiB/s now (8.3 MiB of `y.create.l` lines in 4.6 s, 68 MiB peak). Measure before changing.
 1. **Evaluate a real script collection.** Run `cmmrun check` over a `.cmm` collection per
@@ -59,6 +57,19 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
   - Fix: PRINT shows an address with an access class as `C:0x1000` (and ranges as
     `C:0x1000--0x10FF`), as the simulator does; it used to drop the `0x`.
 
+- **Feedback round 1, part 2** (2026-11-17), checked against the simulator unless noted:
+  - `PER.Set.Field <addr> %<size> <mask> <value>`: read-modify-write; the value is shifted to
+    the mask's lowest set bit. The forms TRACE32 silently ignores (no size, no value) are
+    refused, so a register write is never skipped without notice.
+  - `PRINTF` with C-style conversions and TRACE32's size rules (no modifier = 64-bit, `l` =
+    32-bit unsigned, `h`, `hh`), and its type and argument-count errors.
+  - `QUIT [code]` ends the run, and `cmmrun run` exits with the code, as TRACE32 does.
+  - `OS.VERSION()` (Windows hosts only; refused elsewhere).
+  - `ENTER` reads a line from stdin into macros (mock-tested only: the simulator needs a
+    person at the keyboard). End of input is a script error.
+  - `PLIST` and `sYmbol.SourcePATH.*` are ignored (GUI and source-view only).
+  - Fix: `%CONTinue` appends to the previous output line, as in TRACE32.
+
 ## Not built
 
 - Real-hardware flash/run validation — needs a board on the designated probe.
@@ -79,5 +90,8 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
 - **Golden tests only cover what they print.** PRINT of an address had been wrong (`C:1000`)
   since the start, because no fixture printed one. When adding a value type, add a fixture that
   prints it.
+- **Don't copy TRACE32's silent no-ops when they would skip a target write.**
+  `PER.Set.Field` with a missing argument does nothing in TRACE32; cmmrun refuses it instead,
+  because on hardware a skipped write is worse than an error.
 - **Huge generated scripts exist** (millions of lines of register or symbol tables). Keep
   per-statement memory small, and never parse a whole file up front when only running it.

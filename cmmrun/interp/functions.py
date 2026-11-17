@@ -254,6 +254,20 @@ def _ppf(it, a, ev):
     return Str(str(it.frame.prog.path.resolve())) if it.frame else Str("")
 
 
+@fn("OS.VERSION")
+def _osversion(it, a, ev):
+    # Simulator on Windows 10/11: (0)=2 (the host OS kind), (1)=0A, (2)=0, (3)=0, (4)=0, i.e.
+    # Windows' major and minor version. Other hosts are not probed, so not guessed.
+    import sys
+    i = _i(ev, a[0])
+    if sys.platform != "win32":
+        raise UnsupportedError("OS.VERSION() is only known for Windows hosts")
+    if not 0 <= i <= 4:
+        raise UnsupportedError(f"OS.VERSION({i}) is not known")
+    w = sys.getwindowsversion()
+    return Num({0: 2, 1: w.major, 2: w.minor}.get(i, 0), "hex")
+
+
 @fn("OS.PresentWorkingDirectory")
 def _pwd(it, a, ev):
     return Str(str(it.cwd))

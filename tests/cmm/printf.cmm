@@ -1,0 +1,28 @@
+; PRINTF: C-style conversions, size modifiers, and %CONTinue (appends to the previous line)
+PRINTF "p1=%d|%x|%s|%5d|%-4d|%08X" 42. 255. "str" 7. 3. 0xBEEF
+PRINTF "p2=no args"
+PRINTF "p3=%c%c" 0x41 0x42
+PRINTF "p4=%d" 0x10
+PRINTF "p5=%u %i" 5. 6.
+PRINTF "p6=%%"
+PRINTF "a=%ld|%lx|%lu|%li" -5. -1 -1 -5.
+PRINTF "b=%hd|%hx|%hhx|%hu" -5. 0x12345 0x1FF -1
+PRINTF "c=%lld|%llx|%llu" -5. -1 -1
+PRINTF "d=%d|%u|%i" -1 -1 0xFFFFFFFF
+PRINTF "e=%x|%X" 0x123456789A 0x1F
+PRINTF "f=%d" 0x7FFFFFFFFFFFFFFF
+PRINTF "g=%05.1f|%g|%10.3e" 3.14159 0.5 12345.678
+PRINTF "h=%f" 3.
+PRINTF "i=%x" 'A'
+PRINTF %CONTinue "j="
+PRINT "k"
+PRINT %CONTinue "l="
+PRINTF "m"
+PRINTF "n=%s|%s" "x" ""
+PRINTF "o=%-8s|%5s|%.2s|" "ab" "cd" "abcdef"
+PRINTF "q=%+d|% d|%*d|%o|%#x" 5. 5. 4. 9. 8. 255.
+&f="%d-%d"
+PRINTF "r=&f" 1. 2.
+PRINTF "s=%d" TRUE()
+PRINTF "t=tab\tq"
+ENDDO

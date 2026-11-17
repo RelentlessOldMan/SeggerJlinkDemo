@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import sys
 import time
 from array import array
 from collections import OrderedDict
@@ -31,7 +32,7 @@ from ..lang.parser import Stmt, parse_bytes, parse_line, parse_statement
 from ..lang.vocab import Vocab, abbrev_ok, load
 from . import functions
 from .expr import Evaluator, tokenize
-from .values import (Addr, Num, PracticeError, Rng, Str, TargetError, Time, UnsupportedError, Value, echo,
+from .values import (Addr, Bool, Flt, Num, PracticeError, Rng, Str, TargetError, Time, UnsupportedError, Value, echo,
                      macro_text, plain, to_int, truth)
 
 
@@ -322,7 +323,13 @@ Mode.Hll Mode.Asm Mode.Mix TOOLBAR STATUSBAR MENU.ReProgram MENU.RESet BEEP
 List List.auto Register.view Data.List Data.dump Data.View PER.view SETUP.Var SETUP.LIST
 TITLE FramePOS SYStem.Option.ResBreak SYStem.Option.EnReset SYStem.Option.IMASKASM
 SYStem.Option.IMASKHLL SYStem.MemAccess SYStem.CpuAccess
+PLIST
 """.split())
+# Where the debugger GUI looks for source files: no effect on the target or on the script.
+IGNORED |= {"sYmbol.SourcePATH" + s for s in """
+ .DOWN .Delete .List .RESet .Set .SetBaseDir .SetCache .SetCachedDir .SetCachedDirCache
+ .SetCachedDirIgnoreCache .SetCachedDirIgnoreCase .SetDir .SetDynamicDir .SetMasterDir .SetRecurseDir
+ .SetRecurseDirCache .SetRecurseDirIgnoreCase .Translate .TranslateSUBpath .UP .Verbose""".split() + [""]}
 
 
 def command(*names: str, target: bool = False, connected: bool = False):
@@ -338,6 +345,52 @@ def command(*names: str, target: bool = False, connected: bool = False):
 
 
 HEX_RE = re.compile(r"0x[0-9A-Fa-f][0-9A-Fa-f_]*")
+# PRINTF conversions: %[flags][width|*][.precision][size]conversion
+PRINTF_RE = re.compile(r"%([-+ #0]*)(\*|\d+)?(?:\.(\d+))?(hh|h|ll|l)?([diuxXocsfeEgG%])")
+# Bits a size modifier keeps (simulator: no modifier and ll are 64-bit, l is 32-bit and shown
+# unsigned even by %d, h 16-bit, hh 8-bit).
+PRINTF_BITS = {None: 64, "ll": 64, "l": 32, "h": 16, "hh": 8}
+
+
+def printf_text(fmt: str, vals: list) -> str:
+    """C-style formatting as PRINTF does it in TRACE32 (checked against the simulator)."""
+    vals = list(vals)
+
+    def take():
+        if not vals:
+            raise PracticeError("PRINTF: expression expected (more conversions than arguments)")
+        return vals.pop(0)
+
+    def conv(m: re.Match) -> str:
+        flags, width, prec, size, c = m.groups()
+        if c == "%":
+            return "%"
+        if width == "*":
+            width = str(to_int(take(), "width"))
+        v = take()
+        spec = "%" + flags + (width or "") + ("." + prec if prec is not None else "")
+        if c == "s":
+            if not isinstance(v, Str):
+                raise PracticeError("PRINTF: the expression has a wrong result type (%s needs a string)")
+            return (spec + "s") % v.v
+        if isinstance(v, Str):
+            raise PracticeError(f"PRINTF: the expression has a wrong result type (%{c} needs a number)")
+        if c in "feEgG":
+            return (spec + c) % float(v.v if isinstance(v, Flt) else to_int(v, "value"))
+        n = int(v.v) if isinstance(v, (Bool, Flt)) else to_int(v, "value")
+        bits = PRINTF_BITS[size]
+        n &= (1 << bits) - 1
+        if c in "di" and bits == 64 and n >> 63:
+            n -= 1 << 64                     # only the 64-bit forms are signed
+        if c == "c":
+            return (spec + "c") % chr(n & 0xFF)
+        return (spec + ("d" if c in "iu" else c)) % n
+
+    out = PRINTF_RE.sub(conv, fmt)
+    if vals:
+        raise PracticeError("PRINTF: no more arguments expected")
+    return out
+
 
 SIZES = {"Byte": 1, "Word": 2, "Long": 4, "Quad": 8, "Short": 2, "TByte": 3, "PByte": 5, "HByte": 6,
          "SByte": 7}
@@ -372,7 +425,6 @@ class Interpreter:
         self.vocab = vocab or load()
         self.out_lines: list[str] = []
         self._out_cb = out
-        self._continue_line = False
         self.cwd = pathlib.Path(cwd or ".").resolve()
         self.timeout = timeout
         self.t32_sys = t32_sys
@@ -391,12 +443,16 @@ class Interpreter:
         # Symbols made by sYmbol.CREATE.Label: they exist once sYmbol.CREATE.Done runs (as in TRACE32).
         self.symbols: dict[str, Addr] = {}
         self.new_symbols: dict[str, Addr] = {}
+        self.stdin = sys.stdin              # where ENTER reads from
+        self.quit_code = None               # set by QUIT: TRACE32 exits with it (simulator-checked)
         self.elf_loaded = False             # its debug symbols are not read (see sYmbol.EXIST)
         self.ev = Evaluator(self._call_function, self.symbols.get)
 
     # ---- output
     def emit(self, text: str, cont: bool = False):
-        if self._continue_line and self.out_lines:
+        """One PRINT/PRINTF line. %CONTinue appends to the previous line (simulator: PRINT "k"
+        then PRINT %CONTinue "l=" shows "kl=")."""
+        if cont and self.out_lines:
             self.out_lines[-1] += text
             if self._out_cb:
                 self._out_cb(text, False)
@@ -404,7 +460,6 @@ class Interpreter:
             self.out_lines.append(text)
             if self._out_cb:
                 self._out_cb(text, True)
-        self._continue_line = cont
 
     # ---- entry point
     def run(self, script: str | pathlib.Path, args: list[str] | None = None) -> list[str]:
@@ -773,7 +828,7 @@ class Interpreter:
         c = st.canon
         if c in ("LOCAL", "PRIVATE", "GLOBAL"):
             return self.c_declare(st)
-        if c in ("ENTRY", "PARAMETERS", "RETURNVALUES"):
+        if c in ("ENTRY", "PARAMETERS", "RETURNVALUES", "ENTER"):
             return getattr(self, "c_" + c.lower())(st)
         if "&" in st.text:
             st2 = parse_statement(self.substitute(st.text), st.lineno, self.vocab)
@@ -823,6 +878,18 @@ class Interpreter:
                 parts.append(plain(x, fmt))
         self.emit("".join(parts), cont)
 
+    @command("PRINTF")
+    def c_printf(self, st: Stmt):
+        cont, vals = False, []
+        for kind, x in self._items(st):
+            if kind == "fmt" and _fmt_name(x) == "CONTinue":
+                cont = True
+            elif kind == "val":
+                vals.append(x)
+        if not vals or not isinstance(vals[0], Str):
+            raise PracticeError("PRINTF: a format string expected")
+        self.emit(printf_text(vals[0].v, vals[1:]), cont)
+
     @command("ECHO")
     def c_echo(self, st: Stmt):
         parts = [echo(x) for kind, x in self._items(st) if kind == "val"]
@@ -871,6 +938,15 @@ class Interpreter:
 
     def c_entry(self, st: Stmt):
         self._take(st, self.frame.call_level().entry_args, private=False)
+
+    def c_enter(self, st: Stmt):
+        # TRACE32 reads one line typed into the AREA window; cmmrun reads a line from stdin and
+        # splits it into the macros like ENTRY does. No input left is an error, not empty
+        # values, so a prompt loop (ENTER ... GOTO back) cannot spin forever.
+        line = self.stdin.readline() if self.stdin is not None else ""
+        if not line:
+            raise PracticeError("ENTER: no input (stdin is closed or empty)")
+        self._take(st, lexer.split_args(line.strip()), private=False)
 
     def c_parameters(self, st: Stmt):
         self._take(st, [_unquote(a) for a in self.frame.call_level().entry_args], private=True)
@@ -934,6 +1010,13 @@ class Interpreter:
 
     @command("END")
     def c_end(self, st: Stmt):
+        raise EndAll("END")
+
+    @command("QUIT")
+    def c_quit(self, st: Stmt):
+        """QUIT [code]: TRACE32 closes, and the code (default 0) is its process exit code."""
+        text = self.substitute(" ".join(st.args)).strip()
+        self.quit_code = to_int(self.eval(text), "exit code") & 0xFF if text else 0
         raise EndAll("END")
 
     @command("STOP")
@@ -1202,6 +1285,41 @@ class Interpreter:
         self.backend.write(access, lo, data)
         if verify and self.backend.read(access, lo, len(data)) != data:
             raise TargetError(f"Data.Set /Verify failed at 0x{lo:X}")
+
+    @command("PER.Set.Field", connected=True)
+    def c_per_set_field(self, st: Stmt):
+        """PER.Set.Field <address> %<size> <mask> <value>: read, change the masked bits, write.
+        The value is shifted up to the mask's lowest set bit, as in TRACE32 (simulator: mask
+        0xFF00 value 0xAB turns 0x12345678 into 0x1234AB78)."""
+        items = self._items(st)
+        if any(k == "opt" for k, _ in items):
+            raise PracticeError("PER.Set.Field: too many keywords in line")     # as TRACE32
+        size, order, vals = None, "big" if self.big_endian else "little", []
+        for kind, x in items:
+            if kind == "fmt":
+                name = _fmt_name(x)
+                if name in SIZES:
+                    size = SIZES[name]
+                elif name in ("LE", "BE"):
+                    order = "little" if name == "LE" else "big"
+            elif kind == "val":
+                vals.append(x)
+        if size is None or len(vals) != 3:
+            # TRACE32 silently does nothing for these; refuse instead of skipping the write
+            raise UnsupportedError("PER.Set.Field: only <address> %<size> <mask> <value> is supported")
+        where, mask, value = vals[0], to_int(vals[1], "mask"), to_int(vals[2], "value")
+        if isinstance(where, Rng):
+            raise PracticeError("PER.Set.Field: an address expected, not a range")
+        access = where.access if isinstance(where, Addr) else ""
+        addr = to_int(where, "address")
+        full = (1 << (8 * size)) - 1
+        mask &= full
+        if not mask:
+            return                                    # no bits to change (TRACE32: no change)
+        shift = (mask & -mask).bit_length() - 1
+        old = int.from_bytes(self.backend.read(access, addr, size), order)
+        new = (old & ~mask & full) | ((value << shift) & mask)
+        self.backend.write(access, addr, new.to_bytes(size, order))
 
     def _load(self, st: Stmt, kind: str):
         pos = self._raw_args(st.args)
