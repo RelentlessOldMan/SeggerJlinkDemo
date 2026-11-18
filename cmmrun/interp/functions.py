@@ -13,6 +13,8 @@ from __future__ import annotations
 import fnmatch
 import os
 import pathlib
+import sys
+import time
 from fractions import Fraction
 from typing import TYPE_CHECKING, Callable
 
@@ -273,9 +275,51 @@ def _pwd(it, a, ev):
     return Str(str(it.cwd))
 
 
-@fn("OS.FILE", "OS.FILE.EXIST")
+@fn("OS.FILE", "OS.FILE.EXIST", "FILE.EXIST")
 def _osfile(it, a, ev):
     return Bool(it.resolve_host_path(_s(ev, a[0]) if a[0].lstrip().startswith('"') else a[0].strip()).is_file())
+
+
+def _name_arg(ev, a) -> str:
+    return _s(ev, a[0]) if a and a[0].lstrip().startswith('"') else (a[0].strip() if a else "")
+
+
+@fn("OS.FILE.ABSPATH")
+def _absfile(it, a, ev):
+    # Simulator: relative to the working directory, normalized ("a\..\b.cmm" -> "<cwd>\b.cmm").
+    return Str(os.path.normpath(os.path.join(str(it.cwd), it._expand(_name_arg(ev, a)))))
+
+
+@fn("OS.NAME")
+def _osname(it, a, ev):
+    # "Windows" checked in the simulator; the names for other hosts are unverified.
+    return Str({"win32": "Windows", "darwin": "MacOSX"}.get(sys.platform, "Linux"))
+
+
+@fn("CLOCK.DATE")
+def _date(it, a, ev):
+    t = time.localtime()        # simulator: "18. Nov 2026" (day padding for 1-9 unverified)
+    return Str(f"{t.tm_mday}. {time.strftime('%b', t)} {t.tm_year}")
+
+
+@fn("CLOCK.TIME")
+def _time(it, a, ev):
+    return Str(time.strftime("%H:%M:%S"))
+
+
+@fn("CLOCK.UNIX")
+def _unix(it, a, ev):
+    return _dec(int(time.time()))
+
+
+@fn("AREA.EXIST")
+def _area_exist(it, a, ev):
+    return Bool(_name_arg(ev, a) in it.areas)       # simulator: case-sensitive (a000 is FALSE)
+
+
+@fn("InterCom.PING")
+def _ping(it, a, ev):
+    return Bool(False)          # no other TRACE32 instance to talk to
 
 
 @fn("OS.DIR")
@@ -364,7 +408,7 @@ def _reg(it, a, ev):
     return Num(it.backend.read_reg(a[0].strip()))
 
 
-@fn("STATE.RUN", target=True)
+@fn("STATE.RUN", "RUN", target=True)
 def _run(it, a, ev):
     return Bool(it.backend.is_running())
 

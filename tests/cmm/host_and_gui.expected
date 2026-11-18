@@ -1,0 +1,6 @@
+run=FALSE ping=FALSE
+area=TRUE  FALSE FALSE
+file=FALSE FALSE
+sym=TRUE 
+sym=FALSE
+done

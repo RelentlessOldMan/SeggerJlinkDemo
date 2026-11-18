@@ -1,4 +1,5 @@
 """Interpreter behaviour against the mock target that the TRACE32 golden files can't cover."""
+import os
 import sys
 
 import pytest
@@ -107,7 +108,12 @@ def _run_cli(tmp_path, text, capsys, *extra):
     from cmmrun.cli import main
     s = tmp_path / "m.cmm"
     s.write_text(text, encoding="utf-8")
-    code = main(["run", str(s), *extra])
+    old = os.getcwd()
+    os.chdir(tmp_path)          # files the script writes go to tmp_path, not the repo
+    try:
+        code = main(["run", str(s), *extra])
+    finally:
+        os.chdir(old)
     return code, capsys.readouterr().err
 
 
@@ -261,3 +267,70 @@ def test_system_mode_command(tmp_path):
     it = run(tmp_path, "SYStem.Mode Up\nPRINT SYStem.Mode()\nSYStem.Mode NoDebug\nPRINT SYStem.Up()\nENDDO\n")
     assert it.out_lines == ["0B", "FALSE"]
     fails(tmp_path, "SYStem.Mode StandBy\nENDDO\n", "only Up, Attach")
+
+
+def test_store_register_round_trip(tmp_path):
+    # Simulator format: one "Register.Set <reg> 0x<HEX>" per core register, R0..R14 PC XPSR MSP
+    # PSP CONTROL FAULTMASK BASEPRI PRIMASK; DO of the file restores them.
+    it = run(tmp_path, 'SYStem.Up\nRegister.Set R0 0xABCDEF12\nRegister.Set PC 0x2000\n'
+                       'STOre "regs.cmm" Register\nRegister.Set R0 0\nDO "regs.cmm"\n'
+                       'PRINT Register(R0)\nENDDO\n')
+    assert it.out_lines == ["0ABCDEF12"]
+    lines = (tmp_path / "regs.cmm").read_text().splitlines()
+    regs = [ln.split()[1] for ln in lines if ln.startswith("Register.Set")]
+    assert regs == Interpreter.STORE_REGS
+    assert "Register.Set R0 0xABCDEF12" in lines and "Register.Set PC 0x2000" in lines
+    assert lines[2] == "B::" and lines[-1] == "ENDDO"
+
+
+def test_store_register_while_down_writes_no_registers(tmp_path):
+    run(tmp_path, 'STOre "regs.cmm" Win Register\nENDDO\n')
+    assert "Register.Set" not in (tmp_path / "regs.cmm").read_text()
+
+
+def test_host_commands(tmp_path):
+    import sys
+    py = f'"{sys.executable}" -c'
+    it = run(tmp_path, f'OS.Area {py} "open(\'a.txt\',\'w\').write(\'x\')"\n'
+                       'PRINT OS.FILE("a.txt")\n'
+                       'OS.Area no_such_program_xyz\nOS.Window exit 3\nENDDO\n')
+    assert it.out_lines == ["TRUE "]          # waited for; failures are not script errors
+    it = run(tmp_path, f'OS.Area {py} "open(\'b.txt\',\'w\')"\nENDDO\n', )
+    assert (tmp_path / "b.txt").exists()
+
+
+def test_host_commands_off(tmp_path):
+    s = tmp_path / "s.cmm"
+    s.write_text('OS.Area echo x > c.txt\nENDDO\n', encoding="utf-8")
+    it = Interpreter(MockBackend(), cwd=str(tmp_path), timeout=30)
+    it.host_commands = False
+    it.run(s)
+    assert not (tmp_path / "c.txt").exists() and "not run" in it.warnings[0]
+
+
+def test_dry_run_does_not_run_host_commands(tmp_path, capsys):
+    code, err = _run_cli(tmp_path, 'OS.Area echo x > d.txt\nENDDO\n', capsys, "--dry-run")
+    assert code == 0 and "not run" in err
+    assert not (tmp_path / "d.txt").exists()
+
+
+def test_clock_os_and_path_functions(tmp_path):
+    import pathlib
+    import re
+    it = run(tmp_path, 'PRINT CLOCK.DATE()\nPRINT CLOCK.TIME()\nPRINT OS.FILE.ABSPATH("a\\..\\b.cmm")\n'
+                       'PRINT OS.FILE.ABSPATH(".")\nAREA.Create myarea\nPRINT AREA.EXIST(myarea)\nENDDO\n')
+    date, clock, absb, absdot, area = it.out_lines
+    assert re.fullmatch(r"\d{1,2}\. [A-Z][a-z]{2} \d{4}", date)
+    assert re.fullmatch(r"\d\d:\d\d:\d\d", clock)
+    assert pathlib.Path(absb) == tmp_path / "b.cmm" and pathlib.Path(absdot) == tmp_path
+    assert area == "TRUE "
+
+
+def test_symbol_delete_needs_a_finished_symbol(tmp_path):
+    # Simulator: deleting a name not yet made by sYmbol.CREATE.Done is "symbol not found".
+    fails(tmp_path, "sYmbol.CREATE.Label x 0x10\nsYmbol.Delete x\nENDDO\n", "symbol not found")
+
+
+def test_var_view_warns(tmp_path):
+    it = run(tmp_path, "Var some_global\nVar.View other\nVar a\nENDDO\n")
+    assert len(it.warnings) == 2 and "does not check" in it.warnings[0]

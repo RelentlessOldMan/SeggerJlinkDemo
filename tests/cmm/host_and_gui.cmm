@@ -1,0 +1,20 @@
+; RUN(), InterCom.PING(), AREA.EXIST(), FILE.EXIST(), sYmbol.Delete, and GUI-only commands
+SYStem.CPU CortexM4
+SYStem.Up
+PRINT "run=" RUN() " ping=" InterCom.PING(other)
+PRINT "area=" AREA.EXIST(A000) " " AREA.EXIST(a000) " " AREA.EXIST(A001)
+PRINT "file=" FILE.EXIST("no_such_file.txt") " " FILE.EXIST(OS.PresentPracticeFile())
+sYmbol.CREATE.Label lab1 0x1000
+sYmbol.CREATE.Done
+PRINT "sym=" sYmbol.EXIST(lab1)
+sYmbol.Delete lab1
+PRINT "sym=" sYmbol.EXIST(lab1)
+sYmbol.CASE OFF
+TERM.METHOD DCC
+TERM.SIZE 80. 25.
+TERM.CLOSE
+WinPAGE.Create P001
+Var 1+2
+Var.View 1+2
+PRINT "done"
+ENDDO

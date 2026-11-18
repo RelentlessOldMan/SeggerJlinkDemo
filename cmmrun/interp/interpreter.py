@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import subprocess
 import sys
 import time
 from array import array
@@ -323,9 +324,10 @@ TARGET_COMMANDS: set[str] = set()   # talk to the target (the rest is pure langu
 NEEDS_CONNECTION: set[str] = set()  # fail with a target error unless SYStem.Up was done
 
 IGNORED = set("""
-Data WinTABS
+Data WinTABS sYmbol.CASE TERM.METHOD TERM.SIZE TERM.CLOSE
+WinPAGE.Create WinPAGE.Delete WinPAGE.RESet WinPAGE.select WinPAGE.REName
 WinCLEAR WinPOS WinPAGE WinRESIZE WinTOP WinEXT WinOverlay WinFreeze WinPrint
-AREA AREA.view AREA.Create AREA.Select AREA.CLEAR AREA.Delete AREA.CLOSE AREA.OPEN AREA.RESet
+AREA AREA.view AREA.Select AREA.CLEAR AREA.Delete AREA.CLOSE AREA.OPEN AREA.RESet
 SCREEN SCREEN.ON SCREEN.OFF SCREEN.display SCREEN.WAIT SCREEN.ALways
 Mode.Hll Mode.Asm Mode.Mix TOOLBAR STATUSBAR MENU.ReProgram MENU.RESet BEEP
 List List.auto Register.view Data.List Data.dump Data.View PER.view SETUP.Var SETUP.LIST
@@ -454,7 +456,13 @@ class Interpreter:
         self.stdin = sys.stdin              # where ENTER reads from
         self.quit_code = None               # set by QUIT: TRACE32 exits with it (simulator-checked)
         self.elf_loaded = False             # its debug symbols are not read (see sYmbol.EXIST)
+        self.areas = {"A000"}               # AREA.EXIST(): the default area and AREA.Create'd ones
+        self.host_commands = True           # OS.Area / OS.Window / OS.Command run on the host
         self.ev = Evaluator(self._call_function, self.symbols.get)
+
+    def warn_once(self, text: str):
+        if text not in self.warnings:
+            self.warnings.append(text)
 
     # ---- output
     def emit(self, text: str, cont: bool = False):
@@ -1152,24 +1160,81 @@ class Interpreter:
 
     # STOre items that only hold GUI state, which cmmrun ignores; restoring them is a no-op.
     STORE_GUI_ITEMS = {"WIN", "HISTORY"}
+    STORE_ITEMS = STORE_GUI_ITEMS | {"REGISTER"}
+    # The registers `STOre <file> Register` writes for a Cortex-M, in the simulator's order.
+    STORE_REGS = [f"R{i}" for i in range(15)] + ["PC", "XPSR", "MSP", "PSP", "CONTROL", "FAULTMASK",
+                                                 "BASEPRI", "PRIMASK"]
 
     @command("STOre")
     def c_store(self, st: Stmt):
         """STOre <file> <item>...: TRACE32 writes a script that restores the items (a dated
-        comment, B::, the commands, ENDDO). cmmrun writes the same frame for GUI-only items, so a
-        later DO of the file works; items with debugger state (SYStem, Break, ...) are refused."""
+        comment, B::, the commands, ENDDO). cmmrun writes the same frame. Register writes a
+        Register.Set line per core register (none while the target is down, as in the simulator);
+        the GUI items get a comment; other items (SYStem, Break, ...) are refused."""
         args = [a for a in st.args if not lexer.is_option(a)]
         if len(args) < 2:
             raise PracticeError("STOre <file> <item> expected")
         items = self.substitute(" ".join(args[1:])).split()
-        other = [i for i in items if i.upper() not in self.STORE_GUI_ITEMS]
+        other = [i for i in items if i.upper() not in self.STORE_ITEMS]
         if other:
-            raise UnsupportedError(f"STOre {' '.join(other)}: only the GUI items Win and HISTory "
-                                   "are supported (their state is not kept by cmmrun)")
+            raise UnsupportedError(f"STOre {' '.join(other)}: only Register and the GUI items Win "
+                                   "and HISTory are supported")
+        body = []
+        gui = [i for i in items if i.upper() in self.STORE_GUI_ITEMS]
+        if gui:
+            body.append(f"; {' '.join(gui)}: GUI state, not kept by cmmrun")
+        if any(i.upper() == "REGISTER" for i in items) and self.backend.connected:
+            body += [""] if body else []
+            body += [f"Register.Set {r} 0x{self.backend.read_reg(r):X}" for r in self.STORE_REGS]
         p = self.resolve_host_path(args[0])
         with open(p, "w", encoding="cp1252", errors="replace", newline="\n") as f:
             f.write(f"// cmmrun {time.strftime('%a %b %d %H:%M:%S %Y')}\n\nB::\n\n"
-                    f"; {' '.join(items)}: GUI state, not kept by cmmrun\n\nENDDO\n")
+                    + "".join(line + "\n" for line in body) + "\nENDDO\n")
+
+    # ================================================================ host commands
+    HOST_WAITS = {"OS.Area": True, "OS.Window": True, "OS.Command": False}
+
+    @command("OS.Area", "OS.Window", "OS.Command")
+    def c_oscmd(self, st: Stmt):
+        """Run a host command through the shell, in the current directory. Simulator: OS.Area and
+        OS.Window wait for it, OS.Command does not; a failing or missing program is not an error;
+        the output goes to a window, not to PRINT (cmmrun shows it on stderr)."""
+        line = st.text.strip()[len(st.cmd):].strip()
+        if not line:
+            raise PracticeError(f"{st.canon} <command> expected")
+        if not self.host_commands:
+            self.warnings.append(f"{st.canon} not run (host commands are off): {line}")
+            return
+        print(f"cmmrun: {st.canon}: {line}", file=sys.stderr, flush=True)
+        try:
+            if not self.HOST_WAITS[st.canon]:
+                subprocess.Popen(line, shell=True, cwd=self.cwd, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            left = max(1.0, self.timeout - (time.monotonic() - self._t0))
+            r = subprocess.run(line, shell=True, cwd=self.cwd, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=left)
+        except subprocess.TimeoutExpired:
+            raise Timeout(f"{st.canon} still running after the script timeout ({self.timeout:g} s)") from None
+        except OSError:
+            return
+        text = r.stdout.decode(sys.getfilesystemencoding() if sys.platform != "win32" else "oem",
+                               errors="replace")
+        for out in text.splitlines():
+            print(f"  {out}", file=sys.stderr)
+
+    # ================================================================ GUI views of HLL expressions
+    @command("Var", "Var.View", "Var.Watch", "Var.AddWatch")
+    def c_varview(self, st: Stmt):
+        # A window showing C expressions. TRACE32 checks the symbols (an unknown one is an
+        # error); cmmrun does not read debug info, so it shows nothing and checks nothing.
+        self.warn_once(f"{st.canon} opens a variable window in TRACE32; cmmrun shows nothing and "
+                       "does not check the symbols")
+
+    @command("AREA.Create")
+    def c_area_create(self, st: Stmt):
+        args = self._raw_args(st.args)
+        self.areas.add(self.substitute(args[0]) if args else "A000")
 
     @command("APPEND")
     def c_append(self, st: Stmt):
@@ -1205,6 +1270,13 @@ class Interpreter:
     def c_symdone(self, st: Stmt):
         self.symbols.update(self.new_symbols)
         self.new_symbols.clear()
+
+    @command("sYmbol.Delete")
+    def c_symdelete(self, st: Stmt):
+        # Simulator: only symbols already made by sYmbol.CREATE.Done; else "symbol not found".
+        for name in self._raw_args(st.args):
+            if self.symbols.pop(name, None) is None:
+                raise PracticeError(f"symbol not found: {name}")
 
     @command("sYmbol.RESet")
     def c_symreset(self, st: Stmt):

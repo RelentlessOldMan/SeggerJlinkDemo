@@ -24,9 +24,10 @@ EXTRA_CMDS = """SYStem.Up SYStem.Down SYStem.Attach SYStem.NoDebug SYStem.StandB
 CD Mode.Hll Mode.Asm Mode.Mix FLASH.TARGET FLASH.TARGET2 FLASH.AUTO FLASH.CFI
 Go Step Break SYStem.Mode.Attach SYStem.Mode.Up SYStem.Mode.Go SYStem.Mode.Down
 SYStem.Mode.NoDebug SYStem.Mode.Prepare SYStem.Mode.StandBy SYStem.CONFIG.DEBUGPORTTYPE
-Data.LOAD.Ihex Data.LOAD.Srecord Data.List FLASH.CLEAR Register.RESet SETUP.LIST SYStem.CpuAccess WinEXT""".split()
+Data.LOAD.Ihex Data.LOAD.Srecord Data.List FLASH.CLEAR Register.RESet SETUP.LIST SYStem.CpuAccess WinEXT
+OS.Area""".split()
 EXTRA_FUNCS = """TRUE FALSE Register Data.Long Data.Byte Data.Word Data.Quad Data.Short Data.Float
-Data.String CPU FOUND STATE.RUN PRACTICE.ARG""".split()
+Data.String CPU FOUND STATE.RUN PRACTICE.ARG RUN CLOCK.DATE CLOCK.TIME CLOCK.UNIX""".split()
 
 
 def main() -> int:

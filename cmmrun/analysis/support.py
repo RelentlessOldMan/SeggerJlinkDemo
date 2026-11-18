@@ -12,7 +12,7 @@ from ..interp import functions
 from ..lang import lexer
 from ..interp.interpreter import COMMANDS, IGNORED, TARGET_COMMANDS, Interpreter
 
-STORE_GUI_ITEMS = Interpreter.STORE_GUI_ITEMS
+STORE_ITEMS = Interpreter.STORE_ITEMS
 
 # Handled by the interpreter's control flow rather than a command method.
 CONTROL = {"IF", "ELSE", "WHILE", "RePeaT", "LOCAL", "PRIVATE", "GLOBAL", "ENTRY", "PARAMETERS", "RETURNVALUES", "ENTER"}
@@ -40,7 +40,7 @@ class Support:
     @staticmethod
     def unsupported_event(st) -> str | None:
         """The unsupported form of a command that is supported only with some arguments:
-        `ON <event>` (only ERROR) and `STOre <file> <item>` (only GUI items); else None."""
+        `ON <event>` (only ERROR) and `STOre <file> <item>` (only Register and GUI items); else None."""
         if st.kind != "command":
             return None
         if st.canon == "ON":
@@ -49,7 +49,7 @@ class Support:
         if st.canon == "STOre":
             pos = [a for a in st.args if not lexer.is_option(a)]
             for item in pos[1:]:
-                if "&" not in item and item.upper() not in STORE_GUI_ITEMS:
+                if "&" not in item and item.upper() not in STORE_ITEMS:
                     return f"STOre {item}"
         return None
 

@@ -5,12 +5,16 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
 
 ## Next
 
-0. **Remaining blockers from feedback round 1**: the `Var` command and `Var.VALUE()` (needs
-   ELF/DWARF debug info: a large feature), and `TERM.WRITE` / `TERM.CLOSE` (the target
-   terminal; a J-Link could use RTT, not started). `STOre` is done for `Win` / `HISTory`; the
-   next `check` report shows which other items are used (as `STOre <item>` blockers).
+0. **Remaining blockers after report round 2** (2026-11-18; the round-2 report on
+   2026.11.17.3 showed 347 of 1122 entry scripts RUNNABLE, up from 123, and 363 BLOCKED, down
+   from 612). Still open, by blocked scripts: `InterCom.execute` / `InterCom.WAIT` (talking to
+   a second TRACE32 instance; no equivalent yet), `Var.VALUE()`, `Var.Assign`, `Var.IF` and
+   the rest of the `Var` family (need ELF/DWARF debug info: a large feature), `Break.Set` and
+   `Break.CONFIG.METHOD` (J-Link breakpoints, not started), `TERM.WRITE` (target terminal;
+   RTT, not started), `JTAG.PIN`. `Fine` is an unknown command in TRACE32 too (a script bug,
+   reported as such). DYNAMIC scripts (350) need `run --allow-dynamic`.
    Unverified: `SYStem.Mode()` after Attach or Prepare on real hardware (the simulator says
-   0x0B, as for Up).
+   0x0B, as for Up); `OS.NAME()` on non-Windows hosts; `CLOCK.DATE()` day padding for days 1-9.
    Optional speed-up: a lazy `run` parses each line twice (index pass + execution); about
    1.8 MiB/s now (8.3 MiB of `y.create.l` lines in 4.6 s, 68 MiB peak). Measure before changing.
 1. **Evaluate a real script collection.** Run `cmmrun check` over a `.cmm` collection per
@@ -80,6 +84,28 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
   - `STOre <file> Win|HISTory` writes a restore script in TRACE32's frame (dated comment,
     `B::`, `ENDDO`), so a later `DO` of it works. Items with debugger state (`SYStem`, `Break`,
     ...) are refused by `check`, pre-flight and the run, since replaying them resets the target.
+
+- **Report round 2** (2026-11-18), checked against the simulator unless noted:
+  - `OS.Area`, `OS.Window` (wait for the command) and `OS.Command` (does not wait) run a host
+    command through the shell in the current directory. A failing or missing program is not
+    an error. The output goes to stderr (TRACE32 shows it in a window, not in the PRINT log).
+    `--no-host-commands` turns them off; a `--dry-run` never runs them.
+  - `STOre <file> Register` writes `Register.Set <reg> 0x<HEX>` for R0-R14, PC, XPSR, MSP,
+    PSP, CONTROL, FAULTMASK, BASEPRI, PRIMASK (nothing while the target is down), so `DO` of
+    the file restores them.
+  - `sYmbol.Delete <name>` (only symbols already made by `sYmbol.CREATE.Done`, else "symbol
+    not found").
+  - Functions: `RUN()` (= `STATE.RUN()`), `CLOCK.DATE()` ("18. Nov 2026"), `CLOCK.TIME()`,
+    `CLOCK.UNIX()`, `OS.NAME()`, `FILE.EXIST()` (= `OS.FILE()`: an unquoted argument is a
+    literal file name, even `OS.PPF()`), `AREA.EXIST()` (case-sensitive; `A000` and
+    `AREA.Create`d areas), `OS.FILE.ABSPATH()` (normalized), `InterCom.PING()` (FALSE: no
+    other instance).
+  - Ignored (GUI or terminal setup): `sYmbol.CASE`, `TERM.METHOD`, `TERM.SIZE`, `TERM.CLOSE`,
+    `WinPAGE.Create` / `.Delete` / `.RESet` / `.select` / `.REName`.
+  - `Var`, `Var.View`, `Var.Watch`, `Var.AddWatch` (variable windows) show nothing, with a
+    warning: TRACE32 errors on an unknown symbol there, and cmmrun has no debug info to check.
+  - Vocabulary: `OS.Area`, `RUN()`, `CLOCK.DATE()`, `CLOCK.TIME()`, `CLOCK.UNIX()` added (the
+    manuals' extraction missed them).
 
 ## Not built
 

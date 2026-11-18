@@ -264,6 +264,8 @@ def main(argv=None) -> int:
     p.add_argument("--allow-dynamic", action="store_true", help="allow lines whose command is only known at run time")
     p.add_argument("--dry-run", action="store_true", help="run on the mock target instead of hardware, to check the script first")
     p.add_argument("--timeout", type=float, default=600.0)
+    p.add_argument("--no-host-commands", action="store_true",
+                   help="do not run OS.Area / OS.Window / OS.Command (a dry run never runs them)")
     p.add_argument("--log", help="write a JSON log of target changes here")
     p.set_defaults(func=cmd_run)
 

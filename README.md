@@ -141,6 +141,7 @@ Other SEGGER probes, such as the J-Link built into a dev kit, may be plugged int
 - **An unpowered target is a clean exit 3** (VTref below `min_vtref_mv`). VTref is checked every time the script connects.
 - **Flash:** between `FLASH.ReProgram ALL` (or `FLASH.Program`, `FLASH.AUTO`) and `... OFF`, writes inside the `FLASH.Create` ranges (or the device's flash, from the J-Link device database) are collected and programmed in one J-Link flash download. Writes elsewhere, e.g. to RAM, happen at once.
 - `SYStem.CONFIG.DEBUGPORTTYPE SWD|JTAG` and `SYStem.JtagClock` override `interface` and `speed` from `target.yaml`. A clock without a unit is in Hz, as in TRACE32; `RTCK` means adaptive clocking.
+- **Host commands:** `OS.Area`, `OS.Window` and `OS.Command` run on the PC, as in TRACE32, and each is echoed to stderr. `--no-host-commands` skips them (with a warning); `--dry-run` always skips them.
 - `run` checks the whole script tree before it touches the target. Unsupported means exit code 5, and a broken script exit code 2, with no connection made.
 
 ## Development

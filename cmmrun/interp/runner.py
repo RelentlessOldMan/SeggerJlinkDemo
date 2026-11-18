@@ -215,6 +215,7 @@ def run_cli(a) -> int:
         print(f"cmmrun: {e}", file=sys.stderr)
         return EXIT_TARGET
     it = Interpreter(backend, out=out, timeout=a.timeout)
+    it.host_commands = not (a.dry_run or getattr(a, "no_host_commands", False))
     try:
         entry = it.resolve_script(a.script, None)
     except PracticeError as e:
