@@ -5,6 +5,14 @@ Where cmmrun stands. Updated with every chunk of work; the standing rules are in
 
 ## Next
 
+Agreed order (2026-11-19): (1) a round-3 `check` report on 2026.11.18.0, to rank what still
+blocks; (2) hardware bring-up, the biggest open risk (nothing has run on a real J-Link yet);
+(3) the `Var` family via ELF/DWARF (needs `pyelftools`, a reason-worthy new dependency, and a
+debug-info ELF fixture: check for an Arm GCC toolchain first; the simulator can load the ELF
+and evaluate `Var.VALUE()` without executing, so it stays the ground truth); (4) `Break.Set`
+/ `Break.CONFIG.METHOD`, best done with hardware; (5) `InterCom`, only once it is known what
+the second instance does in those setups.
+
 0. **Remaining blockers after report round 2** (2026-11-18; the round-2 report on
    2026.11.17.3 showed 347 of 1122 entry scripts RUNNABLE, up from 123, and 363 BLOCKED, down
    from 612). Still open, by blocked scripts: `InterCom.execute` / `InterCom.WAIT` (talking to
